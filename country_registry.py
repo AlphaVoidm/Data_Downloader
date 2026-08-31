@@ -155,6 +155,11 @@ def _iter_workbook_countries(workbook_path: Path) -> list[tuple[str, str]]:
         return out
     ws = wb["Global List"]
     continents = {"africa", "asia", "europe", "north america", "south america", "oceania"}
+    header_tokens = {"country", "continent", "searched", "searched (%)",
+                     "data available", "data availability", "data sources",
+                     "population", "population (millions) (2025)", "land area",
+                     "land area (km2)", "websites searched", "date of search",
+                     "success rate", "below are"}
     current = "Other"
     seen: set[str] = set()
     for row in ws.iter_rows(values_only=True):
@@ -164,6 +169,8 @@ def _iter_workbook_countries(workbook_path: Path) -> list[tuple[str, str]]:
         s = str(v).strip()
         if s.casefold() in continents:
             current = s.title()
+            continue
+        if s.casefold() in header_tokens or s.casefold().startswith("below are"):
             continue
         iso3 = normalize_country(s)
         if iso3 and iso3 not in seen:

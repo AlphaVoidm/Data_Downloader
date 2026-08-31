@@ -1,130 +1,188 @@
-"""Component 3 — Source Coverage Registry for HGT-QF Data Desk.
+"""Centralized, extensible Source Registry for HGT-QF (redesigned).
 
-Maintains verified provider metadata plus the *coverage* attributes required by
-the Coverage Engine (Component 4):
+Loads config/source_registry.json. Each source definition contains everything the
+spec requires: source_id, provider, features, supported countries/discovery,
+frequencies, historical coverage, authentication, endpoint, dataset identifier,
+country mapping mechanism, unit, priority, documentation URL, access method, and
+rate-limit information.
 
-    dataset_type          tabular | geospatial
-    coverage_scope        global | regional:<x> | national:<iso3>
-    coverage_countries    approximate number of geographies covered
-    coverage_frequency    native frequency(s)
-    auth_required         none | api_key | api_token | cds_credentials
-    credential_env        env var holding the credential
-    variables             comma-separated concepts this source provides
-
-This is what lets the system answer "which sources actually exist for country X,
-feature Y, at frequency Z, over period P" *before* any network request is made.
+New sources can be added by editing the JSON — no downloader code changes needed.
 """
 from __future__ import annotations
 
-import csv
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
-
-def _resolve_config_dir() -> Path:
-    """Locate the config directory (config/ preferred, repo root fallback)."""
-    root = Path(__file__).parent
-    for candidate in (root / "config", root, Path("/home/claude/config")):
-        if (candidate / "source_registry.csv").exists():
-            return candidate
-    return root / "config"
-
-
-CONFIG_DIR = _resolve_config_dir()
-SOURCE_REGISTRY_CSV = CONFIG_DIR / "source_registry.csv"
+CONFIG_DIR = Path(__file__).parent / "config"
+SOURCE_REGISTRY_JSON = CONFIG_DIR / "source_registry.json"
 
 
 @dataclass(frozen=True)
-class SourceMetadata:
-    source: str
-    organization: str
+class SourceDefinition:
+    source_id: str
+    source_name: str
+    provider: str
     dataset_name: str
-    concept: str
-    geographic_scope: str
-    native_frequency: str
-    unit: str
-    public_access: str
-    api_available: bool
-    license: str
-    official_url: str
-    documentation_url: str
+    organization: str
+    features: tuple[str, ...]
+    coverage_scope: str
+    coverage_description: str
+    coverage_discovery: str
+    frequencies: tuple[str, ...]
     historical_start: int
     historical_end: int
+    auth_required: bool
+    auth_type: str
+    auth_env: str
+    auth_param: str
+    endpoint: str
+    dataset_id: str
+    country_mapping: str
+    unit: str
+    priority: dict[str, int]
+    documentation_url: str
+    access_method: str
+    rate_limit: str
+    license: str
     academic_relevance: str
-    notes: str
-    # --- Coverage-engine extensions ---
-    dataset_type: str = "tabular"
-    coverage_scope: str = "global"
-    coverage_countries_approx: str = ""
-    coverage_frequency: str = ""
-    auth_required: str = "none"
-    credential_env: str = ""
-    variables: str = ""
+    public_access: str
+    api_available: bool
+    notes: str = ""
+    aliases: tuple[str, ...] = field(default_factory=tuple)
+
+    # Legacy-compatible accessors (used by pipeline.py / provenance.py)
+    @property
+    def source(self) -> str:
+        return self.source_name
+
+    @property
+    def concept(self) -> str:
+        return ",".join(self.features)
+
+    @property
+    def geographic_scope(self) -> str:
+        return self.coverage_description
+
+    @property
+    def native_frequency(self) -> str:
+        return ";".join(self.frequencies)
+
+    @property
+    def official_url(self) -> str:
+        return self.endpoint.split("/api")[0] if "/api" in self.endpoint else self.endpoint
 
 
-def load_source_registry() -> dict[str, SourceMetadata]:
-    """Load all registered data source specifications from config/source_registry.csv."""
-    registry: dict[str, SourceMetadata] = {}
-    if not SOURCE_REGISTRY_CSV.exists():
-        return registry
+def _normalize_name(value: str) -> str:
+    return value.strip().casefold().replace("_", " ").replace("-", " ")
 
-    with SOURCE_REGISTRY_CSV.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            s_name = row["source"].strip()
-            registry[s_name] = SourceMetadata(
-                source=s_name,
-                organization=row.get("organization", "").strip(),
-                dataset_name=row.get("dataset_name", "").strip(),
-                concept=row.get("concept", "").strip(),
-                geographic_scope=row.get("geographic_scope", "").strip(),
-                native_frequency=row.get("native_frequency", "").strip(),
-                unit=row.get("unit", "").strip(),
-                public_access=row.get("public_access", "").strip(),
-                api_available=row.get("api_available", "false").strip().lower() == "true",
-                license=row.get("license", "").strip(),
-                official_url=row.get("official_url", "").strip(),
-                documentation_url=row.get("documentation_url", "").strip(),
-                historical_start=int(row.get("historical_start", 2000) or 2000),
-                historical_end=int(row.get("historical_end", 2025) or 2025),
-                academic_relevance=row.get("academic_relevance", "").strip(),
-                notes=row.get("notes", "").strip(),
-                dataset_type=row.get("dataset_type", "tabular").strip(),
-                coverage_scope=row.get("coverage_scope", "global").strip(),
-                coverage_countries_approx=row.get("coverage_countries_approx", "").strip(),
-                coverage_frequency=row.get("coverage_frequency", "").strip(),
-                auth_required=row.get("auth_required", "none").strip(),
-                credential_env=row.get("credential_env", "").strip(),
-                variables=row.get("variables", "").strip(),
-            )
+
+def load_source_registry() -> dict[str, SourceDefinition]:
+    with SOURCE_REGISTRY_JSON.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
+
+    registry: dict[str, SourceDefinition] = {}
+    for source_id, item in cfg.items():
+        if source_id.startswith("_"):
+            continue
+        auth = item.get("auth", {})
+        coverage = item.get("coverage", {})
+        historical = item.get("historical", {})
+        registry[source_id] = SourceDefinition(
+            source_id=source_id,
+            source_name=item.get("source_name", source_id),
+            provider=item.get("provider", ""),
+            dataset_name=item.get("dataset_name", ""),
+            organization=item.get("organization", item.get("provider", "")),
+            features=tuple(item.get("features", [])),
+            coverage_scope=coverage.get("scope", "unknown"),
+            coverage_description=coverage.get("description", ""),
+            coverage_discovery=coverage.get("discovery", ""),
+            frequencies=tuple(item.get("frequencies", [])),
+            historical_start=int(historical.get("start", 2000)),
+            historical_end=int(historical.get("end", 2025)),
+            auth_required=bool(auth.get("required", False)),
+            auth_type=auth.get("type", "none"),
+            auth_env=auth.get("env", ""),
+            auth_param=auth.get("param", ""),
+            endpoint=item.get("endpoint", ""),
+            dataset_id=item.get("dataset_id", ""),
+            country_mapping=item.get("country_mapping", ""),
+            unit=item.get("unit", ""),
+            priority={k: int(v) for k, v in (item.get("priority") or {}).items()},
+            documentation_url=item.get("documentation_url", ""),
+            access_method=item.get("access_method", ""),
+            rate_limit=item.get("rate_limit", ""),
+            license=item.get("license", ""),
+            academic_relevance=item.get("academic_relevance", ""),
+            public_access=item.get("public_access", ""),
+            api_available=bool(item.get("api_available", False)),
+            notes=item.get("notes", ""),
+            aliases=tuple(item.get("aliases", [])),
+        )
     return registry
 
 
 SOURCE_REGISTRY = load_source_registry()
 
+# Legacy display-name aliases used by the v2 pipeline adapters.
+_LEGACY_ALIASES: dict[str, str] = {
+    "entsoe": "ENTSO-E Transparency",
+    "eia": "EIA Open Data",
+    "neso": "ESO / NESO",
+    "aemo": "AEMO",
+    "ember": "Ember",
+    "world_bank": "World Bank",
+    "nasa_power": "NASA POWER",
+    "era5": "ERA5 / CDS",
+    "nager": "Nager.Date",
+    "eurostat": "Eurostat",
+    "owid": "OWID",
+    "irena": "IRENA",
+    "iea": "IEA",
+}
 
-def get_source_metadata(source_name: str) -> SourceMetadata | None:
-    """Retrieve verified metadata for a given data source name."""
-    return SOURCE_REGISTRY.get(source_name)
+_ID_BY_NAME: dict[str, str] = {}
+for _sid, _src in SOURCE_REGISTRY.items():
+    _ID_BY_NAME[_normalize_name(_sid)] = _sid
+    _ID_BY_NAME[_normalize_name(_src.source_name)] = _sid
+    for _alias in _src.aliases:
+        _ID_BY_NAME[_normalize_name(_alias)] = _sid
+for _sid, _legacy in _LEGACY_ALIASES.items():
+    _ID_BY_NAME.setdefault(_normalize_name(_legacy), _sid)
 
 
-def get_all_registered_sources() -> list[SourceMetadata]:
-    """Return all registered source specifications."""
+def _resolve_source_id(name: str) -> str | None:
+    return _ID_BY_NAME.get(_normalize_name(name))
+
+
+def get_source_metadata(source_name: str) -> SourceDefinition | None:
+    """Look up a source by source_id, display name, or legacy alias."""
+    source_id = _resolve_source_id(source_name)
+    if source_id is None:
+        return None
+    return SOURCE_REGISTRY.get(source_id)
+
+
+def get_source(source_id: str) -> SourceDefinition | None:
+    return SOURCE_REGISTRY.get(source_id) or get_source_metadata(source_id)
+
+
+def get_all_registered_sources() -> list[SourceDefinition]:
     return list(SOURCE_REGISTRY.values())
 
 
-def get_sources_for_variable(concept: str) -> list[SourceMetadata]:
-    """Return sources that declare they provide a given concept/variable."""
+def get_sources_for_feature(concept: str) -> list[SourceDefinition]:
     concept_norm = concept.strip().lower()
-    matches = []
-    for meta in SOURCE_REGISTRY.values():
-        variables = {v.strip().lower() for v in meta.variables.split(",")} if meta.variables else set()
-        if concept_norm in variables or meta.concept.strip().lower() == concept_norm:
-            matches.append(meta)
-    return matches
+    return [s for s in SOURCE_REGISTRY.values() if concept_norm in s.features]
+
+
+def credential_env_for(source_id: str) -> str:
+    src = get_source(source_id)
+    return src.auth_env if src else ""
 
 
 __all__ = [
-    "SourceMetadata", "SOURCE_REGISTRY", "get_source_metadata",
-    "get_all_registered_sources", "get_sources_for_variable",
+    "SourceDefinition", "SOURCE_REGISTRY", "get_source", "get_source_metadata",
+    "get_all_registered_sources", "get_sources_for_feature", "credential_env_for",
 ]

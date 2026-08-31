@@ -59,7 +59,7 @@ FIN,Finland,Europe,61.9241,25.7482,70.09,19.09,59.81,31.58,curated
 FJI,Fiji,Oceania,-17.7134,178.065,-9.7134,168.065,-25.7134,-171.935,centroid_derived
 FRA,France,Europe,46.2276,2.2137,51.09,-5.14,41.34,9.56,curated
 GAB,Gabon,Africa,-0.8037,11.6094,7.1963,1.6094,-8.8037,21.6094,centroid_derived
-GBR,United Kingdom,Oceania,55.3781,-3.436,60.85,-8.65,49.86,1.77,curated
+GBR,United Kingdom,Europe,55.3781,-3.436,60.85,-8.65,49.86,1.77,curated
 GEO,Georgia,Europe,42.3154,43.3569,50.3154,33.3569,34.3154,53.3569,centroid_derived
 GHA,Ghana,Africa,7.9465,-1.0232,11.17,-3.26,4.74,1.2,curated
 GIN,Guinea,Africa,9.9456,-9.6966,17.9456,-19.6966,1.9456,0.3034,centroid_derived

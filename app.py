@@ -297,22 +297,23 @@ with tabs[1]:
 
     col_a, col_b = st.columns([1, 2])
     with col_a:
-        top_n = st.number_input("Recommended countries", min_value=1, max_value=50, value=20)
+        max_per_region = st.number_input("Max countries per region", min_value=1, max_value=50, value=6)
         run_audit_btn = st.button("🧭 Run Availability Audit", type="primary", use_container_width=True)
     with col_b:
         st.caption(
             f"Auditing {len(audit_countries)} countries ({int(start_year)}–{int(end_year)}). "
-            "🔑 ACCESS_REQUIRES_AUTH = data exists but a credential is missing."
+            "Discovery-only: no downloads, no API calls. "
+            "🔑 AUTH_REQUIRED = data exists but a credential is missing."
         )
 
     if run_audit_btn:
-        with st.spinner("Running deterministic coverage audit…"):
+        with st.spinner("Running deterministic coverage + readiness audit…"):
             audit = run_availability_audit(
                 countries=audit_countries,
                 start_year=int(start_year),
                 end_year=int(end_year),
                 output_dir=str(Path.cwd() / "hgt_qf_audit"),
-                top_n=int(top_n),
+                max_per_region=int(max_per_region),
             )
         st.session_state.audit_report = render_audit_report(audit)
         st.session_state.audit_result = audit
@@ -325,10 +326,14 @@ with tabs[1]:
 
     if st.session_state.get("audit_report"):
         st.code(st.session_state.audit_report, language=None)
-        detail_csv = Path.cwd() / "hgt_qf_audit" / "metadata" / "feature_coverage_detail.csv"
-        if detail_csv.exists():
-            with st.expander("📊 Full country × feature coverage detail", expanded=False):
-                st.dataframe(pd.read_csv(detail_csv), use_container_width=True, hide_index=True)
+        report_c = Path.cwd() / "hgt_qf_audit" / "metadata" / "report_C_readiness.csv"
+        report_a = Path.cwd() / "hgt_qf_audit" / "metadata" / "report_A_source_coverage.csv"
+        if report_c.exists():
+            with st.expander("📊 REPORT C — HGT-QF country readiness", expanded=False):
+                st.dataframe(pd.read_csv(report_c), use_container_width=True, hide_index=True)
+        if report_a.exists():
+            with st.expander("📊 REPORT A — source coverage (country × feature)", expanded=False):
+                st.dataframe(pd.read_csv(report_a), use_container_width=True, hide_index=True)
 
 # ============================================================================
 # Tab 3: Source Area Mappings

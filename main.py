@@ -1,18 +1,17 @@
-"""HGT-QF Data Downloader — command-line entrypoint.
+"""HGT-QF Data Downloader — command-line entrypoint (redesigned).
 
 Subcommands
 -----------
-    audit     Run the global data availability audit (no downloads).
-    acquire   Run coverage-gated acquisition for the selected countries.
-    run       audit + acquire in sequence (the recommended order).
-    countries List the registered country ISO-3 codes.
+    audit      Discovery-only: country × feature × source matrix + HGT-QF readiness.
+    acquire    Coverage-gated acquisition (endpoint verification + fallback).
+    run        audit -> acquire for CORE_READY/MONTHLY_SUFFICIENT countries.
+    countries  List registered countries.
+    sources    List registered sources.
     rebuild-country-registry   Regenerate config/country_registry.csv.
 
-Examples
---------
-    python main.py audit --start 2000 --end 2024
-    python main.py acquire --countries EGY DEU FRA GBR USA JPN --start 2000 --end 2024
-    python main.py run --countries "G7" --start 2000 --end 2024
+Recommended flow (spec): run `audit` first, review the matrix, then `run`/`acquire`.
+
+Credentials are loaded from .env (gitignored) and never printed.
 """
 from __future__ import annotations
 
@@ -25,22 +24,24 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-from country_utils import REGIONAL_PRESETS, get_country_name, normalize_country
+from country_utils import REGIONAL_PRESETS, normalize_country
+
+CREDENTIAL_ENVS = ("EIA_API_KEY", "ENTSOE_API_TOKEN", "EMBER_API_KEY", "CDS_API_KEY", "CDSAPI_KEY")
 
 
-def _parse_countries(raw: list[str]) -> list[str]:
-    """Expand presets and normalize every entry to ISO-3."""
+def _parse_countries(raw: list[str] | None) -> list[str]:
     codes: list[str] = []
+    if not raw:
+        return codes
     for item in raw:
         item = item.strip()
         if not item:
             continue
         if item in REGIONAL_PRESETS:
-            for preset_code in REGIONAL_PRESETS[item]:
-                if preset_code not in codes:
-                    codes.append(preset_code)
+            for c in REGIONAL_PRESETS[item]:
+                if c not in codes:
+                    codes.append(c)
             continue
-        # Accept comma-separated inline lists.
         for part in item.replace(",", " ").split():
             iso3 = normalize_country(part)
             if iso3 and iso3 not in codes:
@@ -50,39 +51,35 @@ def _parse_countries(raw: list[str]) -> list[str]:
     return codes
 
 
-def _credentials(args: argparse.Namespace) -> dict[str, str]:
+def _credentials() -> dict[str, str]:
     creds: dict[str, str] = {}
-    for env_var in ("EMBER_API_KEY", "ENTSOE_API_TOKEN", "ENTSOE_API_KEY",
-                    "EIA_API_KEY", "CDS_API_KEY", "CDSAPI_KEY"):
-        if os.getenv(env_var):
-            creds[env_var] = os.getenv(env_var, "")
+    for env in CREDENTIAL_ENVS:
+        val = os.getenv(env)
+        if val:
+            creds[env] = val
     return creds
 
 
-def _add_country_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument(
-        "--countries", nargs="*", default=None,
-        help="Country names/ISO-3 codes or preset keys (e.g. G7, EU-27 (Sample)). "
-             "Defaults to the full registered country set.",
-    )
+def _add_common_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--countries", nargs="*", default=None,
+                        help="Country names/ISO-3 codes or presets (e.g. G7). Default: all registered countries.")
     parser.add_argument("--start", type=int, default=2000, help="Start year (default 2000)")
     parser.add_argument("--end", type=int, default=2024, help="End year (default 2024)")
-    parser.add_argument(
-        "--output", default="hgt_qf_data",
-        help="Output root directory (default ./hgt_qf_data)",
-    )
+    parser.add_argument("--output", default="hgt_qf_data", help="Output root directory")
 
 
 def cmd_audit(args: argparse.Namespace) -> int:
     from country_registry import get_all_countries
     from availability_audit import render_audit_report, run_availability_audit
 
-    countries = _parse_countries(args.countries) if args.countries else [r.iso3 for r in get_all_countries()]
+    countries = _parse_countries(args.countries) or [r.iso3 for r in get_all_countries()]
     audit = run_availability_audit(
         countries=countries, start_year=args.start, end_year=args.end,
-        credentials=_credentials(args), output_dir=args.output, top_n=args.top,
+        credentials=_credentials(), output_dir=args.output, max_per_region=args.max_per_region,
     )
     print(render_audit_report(audit))
+    if args.output:
+        print(f"\nReports written to {args.output}/metadata/")
     return 0
 
 
@@ -96,34 +93,69 @@ def cmd_acquire(args: argparse.Namespace) -> int:
         return 2
 
     results = run_acquisition(
-        countries=countries, start=args.start, end=args.end, output_dir=args.output,
-        credentials=_credentials(args), feature_ids=args.features,
+        countries=countries, start=args.start, end=args.end, out_dir=args.output,
+        credentials=_credentials(), concepts=args.features,
         progress=lambda msg: print(f"  … {msg}", flush=True),
     )
-
     generate_acquisition_report(args.output, results)
 
     ok = sum(1 for r in results if r.status in ("SUCCESS", "PARTIAL_SUCCESS"))
-    print(f"\nAcquisition complete: {ok}/{len(results)} variables acquired "
-          f"({len(countries)} countries).")
-    print(f"Report: {args.output}/metadata/acquisition_report.csv")
+    print(f"\nAcquisition complete: {ok}/{len(results)} country-features acquired.")
+    print(f"Report B: {args.output}/metadata/report_B_acquisition.csv")
     return 0
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    rc = cmd_audit(args)
-    if rc != 0:
-        return rc
-    print("\nProceeding to coverage-gated acquisition…\n")
-    return cmd_acquire(args)
+    from country_registry import get_all_countries
+    from availability_audit import build_report_c, render_audit_report, run_availability_audit
+    from acquisition_engine import run_acquisition
+    from acquisition_report import generate_acquisition_report
+
+    countries = _parse_countries(args.countries) or [r.iso3 for r in get_all_countries()]
+    audit = run_availability_audit(
+        countries=countries, start_year=args.start, end_year=args.end,
+        credentials=_credentials(), output_dir=args.output, max_per_region=args.max_per_region,
+    )
+    print(render_audit_report(audit))
+
+    report_c = build_report_c(countries, args.start, args.end, _credentials())
+    eligible = report_c[
+        (report_c["demand_status"] == "MONTHLY_SUFFICIENT") &
+        (report_c["core_readiness"].isin(("CORE_READY", "CORE_PARTIAL")))
+    ]["iso3"].tolist()
+
+    if args.limit:
+        eligible = eligible[: args.limit]
+
+    if not eligible:
+        print("\nNo CORE_READY / MONTHLY_SUFFICIENT countries found; skipping acquisition.")
+        return 0
+
+    print(f"\nAcquiring {len(eligible)} eligible countries: {', '.join(eligible)}\n")
+    results = run_acquisition(
+        countries=eligible, start=args.start, end=args.end, out_dir=args.output,
+        credentials=_credentials(), progress=lambda m: print(f"  … {m}", flush=True),
+    )
+    generate_acquisition_report(args.output, results)
+    ok = sum(1 for r in results if r.status in ("SUCCESS", "PARTIAL_SUCCESS"))
+    print(f"\nAcquisition complete: {ok}/{len(results)} country-features acquired.")
+    return 0
 
 
 def cmd_countries(args: argparse.Namespace) -> int:
     from country_registry import get_all_countries
-    records = get_all_countries()
-    for r in records:
+    for r in get_all_countries():
         print(f"{r.iso3}\t{r.country_name}\t{r.region}\t{r.bbox_source}")
-    print(f"\n{len(records)} countries registered.")
+    print(f"\n{len(get_all_countries())} countries registered.")
+    return 0
+
+
+def cmd_sources(args: argparse.Namespace) -> int:
+    from source_registry import get_all_registered_sources
+    for s in get_all_registered_sources():
+        auth = "auth:" + s.auth_type if s.auth_required else "open"
+        print(f"{s.source_id:<12} {s.source_name:<20} features={','.join(s.features)[:60]:<60} "
+              f"{';'.join(s.frequencies):<20} {auth}")
     return 0
 
 
@@ -138,26 +170,25 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="main.py", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_audit = sub.add_parser("audit", help="Global availability audit (no downloads)")
-    _add_country_args(p_audit)
-    p_audit.add_argument("--top", type=int, default=20, help="Recommended-country list length")
+    p_audit = sub.add_parser("audit", help="Discovery-only coverage + readiness audit")
+    _add_common_args(p_audit)
+    p_audit.add_argument("--max-per-region", type=int, default=6, help="Diverse-selection cap per region")
     p_audit.set_defaults(func=cmd_audit)
 
     p_acquire = sub.add_parser("acquire", help="Coverage-gated acquisition")
-    _add_country_args(p_acquire)
-    p_acquire.add_argument(
-        "--features", nargs="*", default=None,
-        help="Optional subset of feature IDs (e.g. VAR_01 VAR_02)",
-    )
+    _add_common_args(p_acquire)
+    p_acquire.add_argument("--features", nargs="*", default=None,
+                           help="Optional feature concepts (e.g. electricity_demand temperature_2m)")
     p_acquire.set_defaults(func=cmd_acquire)
 
-    p_run = sub.add_parser("run", help="audit + acquire")
-    _add_country_args(p_run)
-    p_run.add_argument("--top", type=int, default=20)
-    p_run.add_argument("--features", nargs="*", default=None)
+    p_run = sub.add_parser("run", help="audit -> acquire for eligible countries")
+    _add_common_args(p_run)
+    p_run.add_argument("--max-per-region", type=int, default=6)
+    p_run.add_argument("--limit", type=int, default=None, help="Cap the number of countries acquired")
     p_run.set_defaults(func=cmd_run)
 
     sub.add_parser("countries", help="List registered countries").set_defaults(func=cmd_countries)
+    sub.add_parser("sources", help="List registered sources").set_defaults(func=cmd_sources)
     sub.add_parser("rebuild-country-registry", help="Regenerate config/country_registry.csv").set_defaults(
         func=cmd_rebuild_country_registry
     )

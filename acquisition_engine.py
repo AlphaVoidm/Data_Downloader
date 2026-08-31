@@ -1,236 +1,219 @@
-"""Component 5 — Acquisition Engine for HGT-QF.
+"""Acquisition Engine for HGT-QF (redesigned).
 
-Downloads only from sources that the Coverage Engine has confirmed are available
-for a given country x feature x period. Anything else is skipped with a recorded
-reason and *no network request*.
+For every country x feature:
+    1. coverage discovery (which sources SUPPORT it, in priority order)
+    2. endpoint verification for the best supported source
+    3. if verification fails, fall back to the next supported source
+    4. download/extract via the matching connector
+    5. never treats HTTP 200 HTML/portal/error as data (response_validator)
 
-Dispatch:
-    tabular sources     -> existing verified adapters (Ember, ENTSO-E, EIA, NESO,
-                           World Bank, NASA POWER, Nager.Date)
-    geospatial sources  -> Component 6 scientific extractor (ERA5 / CMIP6)
-    sources with no     -> recorded as ADAPTER_PENDING / RESEARCH_TIER (never
-    adapter yet           silently dropped)
+Only reports a final failure after ALL applicable sources have been evaluated.
 """
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
 
+from connectors import get_connector
+from connectors.base import (
+    AcquisitionOutcome,
+    EndpointVerification,
+    VERIFIED,
+)
+from country_registry import get_country_record
 from coverage_engine import (
-    ACCESS_REQUIRES_AUTH,
-    AVAILABLE,
-    PARTIAL_AVAILABLE,
+    AUTH_REQUIRED,
+    MAPPING_REQUIRED,
+    NOT_SUPPORTED,
+    SUPPORTED,
+    TEMPORARILY_UNAVAILABLE,
+    UNKNOWN,
     resolve_feature,
 )
-from directory_structure import get_raw_path
-from feature_registry import FEATURE_REGISTRY, get_all_features
-from pipeline import ADAPTERS
-from scientific_extractor import (
-    MODE_COUNTRY_AGGREGATE,
-    extract_era5_monthly_country,
+from feature_registry import (
+    FEATURE_REGISTRY,
+    get_all_features,
+    get_target_feature,
 )
 
-# Feature concept -> ERA5 variable subset used by the scientific extractor.
-CLIMATE_VARIABLE_MAP: dict[str, list[str]] = {
-    "temperature": ["temperature"],
-    "solar_radiation": ["solar_radiation"],
-    "wind_speed": ["wind_speed"],
-    "precipitation": ["precipitation"],
-}
 
-# Sources registered but without an acquisition adapter yet.
-PENDING_SOURCES = {
-    "AEMO", "IIASA SSP", "GPWv4", "IEA", "IRENA", "Eurostat", "OWID",
-}
+def now_utc() -> str:
+    return datetime.now(timezone.utc).isoformat()
 
 
 @dataclass
-class AcquisitionResult:
+class AcquiredFeature:
     country: str
     country_name: str
-    feature_id: str
     concept: str
-    feature_name: str
-    source: str
+    name: str
+    role: str
+    source_id: str
+    source_name: str
     status: str
     message: str
     records: int = 0
     path: str = ""
     frequency: str = ""
-    dataset_type: str = "tabular"
-    start_year: int = 0
-    end_year: int = 0
-    retrieved_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
-    source_url: str = ""
-    doi: str = ""
-    skip_reason: str = ""
+    unit: str = ""
+    requested_start: str = ""
+    requested_end: str = ""
+    received_start: str = ""
+    received_end: str = ""
+    verification_status: str = ""
+    verification_notes: list[str] = field(default_factory=list)
+    failure_reason: str = ""
+    attempts: list[dict[str, Any]] = field(default_factory=list)
+    retrieved_at: str = field(default_factory=now_utc)
 
     def to_dict(self) -> dict[str, Any]:
         return self.__dict__.copy()
 
 
-def _normalize_status(status: str) -> str:
-    status = (status or "").strip().upper()
-    if status in ("SUCCESS",):
-        return "SUCCESS"
-    if status in ("PARTIAL_SUCCESS", "PARTIAL_AVAILABLE"):
-        return "PARTIAL_SUCCESS"
-    if status in ("ACCESS_REQUIRES_AUTH", "ACCESS_RESTRICTED"):
-        return "ACCESS_REQUIRES_AUTH"
-    if status in ("NO_DATA_AVAILABLE", "VARIABLE_NOT_AVAILABLE"):
-        return "NO_DATA_AVAILABLE"
-    if status in ("MAPPING_MISSING", "SOURCE_NOT_COVERED", "NOT_COVERED"):
-        return "NOT_COVERED"
-    if status in ("PERIOD_NOT_AVAILABLE",):
-        return "PERIOD_NOT_AVAILABLE"
-    if status in ("API_ERROR", "DOWNLOAD_ERROR", "PARSE_ERROR", "INVALID_RESPONSE"):
-        return "DOWNLOAD_ERROR"
-    if status in ("DEPENDENCY_MISSING", "ADAPTER_PENDING", "RESEARCH_TIER"):
-        return status
-    return status or "UNKNOWN"
-
-
-def _run_tabular_adapter(
-    source: str, country: str, output_dir: Path, start: int, end: int, credentials: dict[str, str] | None
-) -> tuple[int, str, str, str]:
-    adapter = ADAPTERS.get(source)
-    if adapter is None:
-        return 0, "ADAPTER_PENDING", f"No acquisition adapter registered for {source}", ""
-    frequency = {
-        "Ember": "monthly", "ENTSO-E Transparency": "hourly",
-        "EIA Open Data": "hourly", "ESO / NESO": "half-hourly",
-        "World Bank": "annual", "NASA POWER": "daily", "Nager.Date": "annual",
-    }.get(source, "")
-    output = get_raw_path(output_dir, source, country, frequency or "unknown")
-    records, status, message = adapter(country, output, start, end, credentials)
-    return records, status, message, str(output) if records > 0 else ""
-
-
-def _run_scientific_adapter(
-    source: str, concept: str, country: str, output_dir: Path, start: int, end: int,
-    credentials: dict[str, str] | None, mode: str,
-) -> tuple[int, str, str, str]:
-    if source == "ERA5 / CDS":
-        variables = CLIMATE_VARIABLE_MAP.get(concept)
-        if not variables:
-            return 0, "VARIABLE_NOT_AVAILABLE", f"No ERA5 variable mapped for '{concept}'", ""
-        result = extract_era5_monthly_country(
-            country_iso3=country, variables=variables, start_year=start, end_year=end,
-            mode=mode, output_dir=output_dir, credentials=credentials,
-        )
-        return result.records, result.status, result.message, result.output_path
-    if source == "CMIP6 / CDS":
-        return 0, "RESEARCH_TIER", "CMIP6 scenario extraction requires SSP selection (future module)", ""
-    return 0, "ADAPTER_PENDING", f"No scientific extractor for {source}", ""
+def _connector_failure_status(verification: EndpointVerification) -> str:
+    """Map a failed endpoint verification onto an acquisition status."""
+    s = verification.status
+    if s == "AUTH_FAILED":
+        return "AUTH_FAILED"
+    if s == "RATE_LIMITED":
+        return "RATE_LIMITED"
+    if s in ("NETWORK_ERROR", "TIMEOUT"):
+        return "NOT_VERIFIED"  # transient; will fall back / retry
+    if s == "MAPPING_REQUIRED":
+        return "MAPPING_REQUIRED"
+    if s == "NOT_SUPPORTED":
+        return "NOT_SUPPORTED"
+    if s in ("PORTAL_HTML", "NON_DATA_RESPONSE"):
+        return "NON_DATA_RESPONSE"
+    if s in ("INVALID_XML", "INVALID_JSON", "INVALID_CSV"):
+        return "PARSE_ERROR"
+    if s == "EMPTY_RESPONSE":
+        return "EMPTY_RESPONSE"
+    if s == "SCHEMA_MISMATCH":
+        return "SCHEMA_MISMATCH"
+    if s == "NO_RECORDS":
+        return "NO_RECORDS"
+    if s == "BULK_MANUAL":
+        return "BULK_MANUAL"
+    if s == "DEPENDENCY_MISSING":
+        return "DEPENDENCY_MISSING"
+    return "NOT_VERIFIED"
 
 
 def acquire_feature(
-    feature_id: str,
+    concept: str,
     country: str,
     start: int,
     end: int,
-    output_dir: Path | str,
+    out_dir: Path | str,
     credentials: dict[str, str] | None = None,
-    mode: str = MODE_COUNTRY_AGGREGATE,
-) -> AcquisitionResult:
-    """Acquire one feature for one country, using the coverage engine's selection."""
-    feature = FEATURE_REGISTRY.get(feature_id)
-    if feature is None:
-        raise KeyError(f"Unknown feature id: {feature_id}")
+) -> AcquiredFeature:
+    feature = FEATURE_REGISTRY[concept.strip().lower()]
+    country = country.strip().upper()
+    rec = get_country_record(country)
+    cname = rec.country_name if rec else country
 
-    from country_utils import get_country_name
+    plan = resolve_feature(concept, country, start, end, credentials)
 
-    cname = get_country_name(country)
-    plan = resolve_feature(feature_id, country, start, end, credentials)
-
-    base = AcquisitionResult(
-        country=country,
-        country_name=cname,
-        feature_id=feature_id,
-        concept=feature.concept,
-        feature_name=feature.feature_name,
-        source=plan.best_source,
-        status="",
-        message="",
-        frequency=plan.best_frequency,
-        start_year=start,
-        end_year=end,
+    base = AcquiredFeature(
+        country=country, country_name=cname, concept=concept, name=feature.name,
+        role=feature.role, source_id=plan.best_source_id, source_name=plan.best_source_name,
+        status="", message="", requested_start=f"{start}-01", requested_end=f"{end}-12",
     )
 
-    # Skip anything the coverage engine already knows is unavailable — no HTTP.
-    if plan.best_status not in (AVAILABLE, PARTIAL_AVAILABLE):
-        base.status = _normalize_status(plan.best_status)
-        base.skip_reason = plan.best_status
-        base.message = _skip_message(plan)
+    # If discovery says nothing is supported, stop here (no HTTP).
+    if plan.best_status != SUPPORTED:
+        base.status = plan.best_status
+        base.failure_reason = plan.best_status
+        base.message = {
+            NOT_SUPPORTED: "No registered source supports this country/feature",
+            AUTH_REQUIRED: "Data exists but required credentials are missing",
+            MAPPING_REQUIRED: "Area/series mapping required before download",
+            TEMPORARILY_UNAVAILABLE: "No source currently available for the requested period",
+            UNKNOWN: "Source(s) not present in the registry",
+        }.get(plan.best_status, plan.best_status)
         return base
 
-    source = plan.best_source
-    base.dataset_type = "geospatial" if source in ("ERA5 / CDS", "CMIP6 / CDS") else "tabular"
+    # Walk supported candidates in priority order with fallback.
+    supported_candidates = [d for d in plan.decisions if d.status == SUPPORTED]
+    for decision in supported_candidates:
+        connector = get_connector(decision.source_id)
+        if connector is None:
+            base.attempts.append({"source": decision.source_name, "verification": "SKIPPED",
+                                  "note": "no connector registered"})
+            continue
 
-    if source in ADAPTERS:
-        records, status, message, path = _run_tabular_adapter(
-            source, country, Path(output_dir), start, end, credentials
+        verification, outcome = connector(
+            country=country, feature=concept, start=start, end=end,
+            credentials=credentials, out_dir=Path(out_dir),
         )
-    elif source in ("ERA5 / CDS", "CMIP6 / CDS"):
-        records, status, message, path = _run_scientific_adapter(
-            source, feature.concept, country, Path(output_dir), start, end, credentials, mode
-        )
-    elif source in PENDING_SOURCES:
-        records, status, message, path = 0, "ADAPTER_PENDING", (
-            f"{source} is covered by the registry but has no acquisition adapter yet"
-        ), ""
+        base.attempts.append({
+            "source": decision.source_name,
+            "verification": verification.status,
+            "verification_note": verification.message,
+        })
+
+        if verification.status == VERIFIED:
+            if outcome.status in ("SUCCESS", "PARTIAL_SUCCESS"):
+                base.source_id = outcome.source_id
+                base.source_name = decision.source_name
+                base.status = outcome.status
+                base.message = outcome.message
+                base.records = outcome.records
+                base.path = outcome.path
+                base.frequency = outcome.frequency
+                base.unit = outcome.unit
+                base.received_start = outcome.received_start
+                base.received_end = outcome.received_end
+                base.verification_status = VERIFIED
+                base.verification_notes = outcome.verification_notes
+                base.failure_reason = outcome.failure_reason
+                return base
+            # Verified endpoint but non-successful outcome (e.g. BULK_MANUAL,
+            # NO_RECORDS, SCHEMA_MISMATCH) -> fall through to the next source.
+            base.attempts[-1]["failure_reason"] = outcome.status
+            base.attempts[-1]["verification"] = verification.status
+            base.attempts[-1]["note"] = outcome.message
+            continue
+
+        # Verification failed for this source -> record and try the next.
+        mapped = _connector_failure_status(verification)
+        base.attempts[-1]["failure_reason"] = mapped
+        base.attempts[-1]["verification"] = verification.status
+        base.attempts[-1]["note"] = verification.message
+
+    # All supported sources failed verification/download. Report the
+    # highest-priority (first) source's outcome as the final status.
+    if base.attempts:
+        base.status = base.attempts[0].get("failure_reason", "NOT_VERIFIED")
+        base.failure_reason = base.status
     else:
-        records, status, message, path = 0, "ADAPTER_PENDING", (
-            f"No acquisition path registered for {source}"
-        ), ""
-
-    base.status = _normalize_status(status)
-    base.message = message
-    base.records = records
-    base.path = path
+        base.status = "NOT_VERIFIED"
+        base.failure_reason = "NOT_VERIFIED"
+    base.message = "All supported sources failed verification or download"
     return base
-
-
-def _skip_message(plan: Any) -> str:
-    if plan.best_status == "NOT_COVERED":
-        return "Skipped: no registered source covers this country/feature (no HTTP request made)"
-    if plan.best_status == "VARIABLE_NOT_AVAILABLE":
-        return "Skipped: candidate sources do not publish this variable for this country"
-    if plan.best_status == "PERIOD_NOT_AVAILABLE":
-        return "Skipped: requested period is outside all candidate source ranges"
-    if plan.best_status == "ACCESS_REQUIRES_AUTH":
-        return "Skipped: data exists but a credential is required and not provided"
-    return f"Skipped: {plan.best_status}"
 
 
 def run_acquisition(
     countries: list[str],
     start: int,
     end: int,
-    output_dir: Path | str,
+    out_dir: Path | str,
     credentials: dict[str, str] | None = None,
-    feature_ids: list[str] | None = None,
-    mode: str = MODE_COUNTRY_AGGREGATE,
+    concepts: list[str] | None = None,
     progress: Callable[[str], None] | None = None,
-) -> list[AcquisitionResult]:
-    """Run the full acquisition across countries x features (coverage-gated)."""
-    from country_utils import get_country_name
-
-    ids = feature_ids or [f.feature_id for f in get_all_features()]
-    results: list[AcquisitionResult] = []
+) -> list[AcquiredFeature]:
+    if concepts is None:
+        concepts = [f.concept for f in get_all_features()]
+    results: list[AcquiredFeature] = []
     for iso3 in countries:
-        cname = get_country_name(iso3)
-        for fid in ids:
+        for concept in concepts:
             if progress:
-                progress(f"{cname} ({iso3}) | {fid}")
-            results.append(acquire_feature(fid, iso3, start, end, output_dir, credentials, mode))
+                progress(f"{iso3} | {concept}")
+            results.append(acquire_feature(concept, iso3, start, end, out_dir, credentials))
     return results
 
 
-__all__ = [
-    "AcquisitionResult", "acquire_feature", "run_acquisition",
-    "CLIMATE_VARIABLE_MAP", "PENDING_SOURCES",
-]
+__all__ = ["AcquiredFeature", "acquire_feature", "run_acquisition"]

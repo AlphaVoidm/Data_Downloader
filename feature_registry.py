@@ -1,105 +1,149 @@
-"""Component 2 — Feature Registry for HGT-QF.
+"""Feature configuration for HGT-QF (redesigned).
 
-Canonical definition of the 25 conceptual research variables, each with:
+Loads config/feature_config.json and exposes a role-based feature model:
 
-    feature_id, concept, name, domain, required frequency, unit,
-    ordered source candidates (priority), dataset type, availability class.
+    role: TARGET | CORE_EXOGENOUS | OPTIONAL_EXOGENOUS
 
-The *ordered source candidates* implement the plan's source-selection priorities:
-for every feature the coverage engine walks the candidates in order and picks the
-first one that is AVAILABLE for a given country x feature x frequency x period.
+The electricity_demand feature is the forecasting TARGET and is treated
+separately from explanatory features everywhere downstream.
 """
 from __future__ import annotations
 
-import csv
-from dataclasses import dataclass
+import json
+from dataclasses import dataclass, field
 from pathlib import Path
 
 CONFIG_DIR = Path(__file__).parent / "config"
-if not (CONFIG_DIR / "feature_registry.csv").exists():
-    CONFIG_DIR = Path(__file__).parent
-FEATURE_REGISTRY_CSV = CONFIG_DIR / "feature_registry.csv"
+FEATURE_CONFIG_JSON = CONFIG_DIR / "feature_config.json"
+
+ROLE_TARGET = "TARGET"
+ROLE_CORE_EXOGENOUS = "CORE_EXOGENOUS"
+ROLE_OPTIONAL_EXOGENOUS = "OPTIONAL_EXOGENOUS"
 
 
 @dataclass(frozen=True)
 class FeatureSpec:
-    feature_id: str
     concept: str
-    feature_name: str
+    name: str
     domain: str
-    required_frequency: str
+    frequency: str
     unit: str
-    dataset_type: str
-    source_candidates: tuple[str, ...]
-    availability_class: str  # mandatory | optional | experimental
-    is_target: bool
-    is_derived: bool
-    definition: str
+    role: str
+    sources: tuple[str, ...] = field(default_factory=tuple)
+    country_overrides: dict[str, tuple[str, ...]] = field(default_factory=dict)
+    min_history_months: int = 0
+    min_source_frequency: str = ""
     derived_from: str = ""
+    note: str = ""
+    demand_priority: bool = False
+
+    @property
+    def is_target(self) -> bool:
+        return self.role == ROLE_TARGET
+
+    @property
+    def is_core(self) -> bool:
+        return self.role in (ROLE_TARGET, ROLE_CORE_EXOGENOUS)
+
+    @property
+    def is_optional(self) -> bool:
+        return self.role == ROLE_OPTIONAL_EXOGENOUS
+
+    @property
+    def is_derived(self) -> bool:
+        return bool(self.derived_from)
+
+    def ordered_sources(self, country_iso3: str) -> tuple[str, ...]:
+        """Return the feature's source priority list for a given country,
+        applying any country-specific overrides."""
+        iso3 = country_iso3.strip().upper()
+        if iso3 in self.country_overrides:
+            overridden = list(self.country_overrides[iso3])
+            for s in self.sources:
+                if s not in overridden:
+                    overridden.append(s)
+            return tuple(overridden)
+        return self.sources
 
 
-def _split_candidates(raw: str) -> tuple[str, ...]:
-    return tuple(s.strip() for s in (raw or "").split("|") if s.strip())
+def _load() -> dict[str, FeatureSpec]:
+    with FEATURE_CONFIG_JSON.open("r", encoding="utf-8") as f:
+        cfg = json.load(f)
 
-
-def load_feature_registry() -> dict[str, FeatureSpec]:
     registry: dict[str, FeatureSpec] = {}
-    if not FEATURE_REGISTRY_CSV.exists():
-        return registry
-    with FEATURE_REGISTRY_CSV.open("r", encoding="utf-8") as f:
-        reader = csv.DictReader(f)
-        for row in reader:
-            fid = row["feature_id"].strip()
-            registry[fid] = FeatureSpec(
-                feature_id=fid,
-                concept=row.get("concept", "").strip(),
-                feature_name=row.get("feature_name", "").strip(),
-                domain=row.get("domain", "").strip(),
-                required_frequency=row.get("required_frequency", "").strip(),
-                unit=row.get("unit", "").strip(),
-                dataset_type=row.get("dataset_type", "tabular").strip(),
-                source_candidates=_split_candidates(row.get("source_candidates", "")),
-                availability_class=row.get("availability_class", "optional").strip(),
-                is_target=row.get("is_target", "false").strip().lower() == "true",
-                is_derived=row.get("is_derived", "false").strip().lower() == "true",
-                definition=row.get("definition", "").strip(),
-                derived_from=row.get("derived_from", "").strip(),
-            )
+
+    def _add(role: str, item: dict) -> None:
+        concept = item["concept"]
+        overrides = {
+            k.upper(): tuple(v)
+            for k, v in (item.get("country_overrides") or {}).items()
+        }
+        registry[concept] = FeatureSpec(
+            concept=concept,
+            name=item["name"],
+            domain=item["domain"],
+            frequency=item.get("frequency", "annual"),
+            unit=item.get("unit", ""),
+            role=role,
+            sources=tuple(item.get("sources", [])),
+            country_overrides=overrides,
+            min_history_months=int(item.get("min_history_months", 0)),
+            min_source_frequency=item.get("min_source_frequency", ""),
+            derived_from=item.get("derived_from", ""),
+            note=item.get("note", ""),
+            demand_priority=bool(item.get("demand_priority", False)),
+        )
+
+    for item in cfg.get("targets", []):
+        _add(ROLE_TARGET, item)
+    for item in cfg.get("core_exogenous", []):
+        _add(ROLE_CORE_EXOGENOUS, item)
+    for item in cfg.get("optional_exogenous", []):
+        _add(ROLE_OPTIONAL_EXOGENOUS, item)
     return registry
 
 
-FEATURE_REGISTRY = load_feature_registry()
+FEATURE_REGISTRY = _load()
 
 
-def get_feature(feature_id: str) -> FeatureSpec | None:
-    return FEATURE_REGISTRY.get(feature_id.strip().upper())
+def get_feature(concept: str) -> FeatureSpec | None:
+    return FEATURE_REGISTRY.get(concept.strip().lower())
 
 
-def get_feature_by_concept(concept: str) -> FeatureSpec | None:
+def get_target_feature() -> FeatureSpec:
     for spec in FEATURE_REGISTRY.values():
-        if spec.concept == concept.strip().lower():
+        if spec.is_target:
             return spec
-    return None
+    raise KeyError("No TARGET feature configured")
 
 
-def get_all_features() -> list[FeatureSpec]:
-    return sorted(FEATURE_REGISTRY.values(), key=lambda f: f.feature_id)
+def get_core_features() -> list[FeatureSpec]:
+    return sorted(
+        [f for f in FEATURE_REGISTRY.values() if f.is_core],
+        key=lambda f: f.concept,
+    )
 
 
-def get_mandatory_features() -> list[FeatureSpec]:
-    return [f for f in FEATURE_REGISTRY.values() if f.availability_class == "mandatory"]
+def get_core_exogenous() -> list[FeatureSpec]:
+    return sorted(
+        [f for f in FEATURE_REGISTRY.values() if f.role == ROLE_CORE_EXOGENOUS],
+        key=lambda f: f.concept,
+    )
 
 
 def get_optional_features() -> list[FeatureSpec]:
-    return [f for f in FEATURE_REGISTRY.values() if f.availability_class == "optional"]
+    return sorted(
+        [f for f in FEATURE_REGISTRY.values() if f.role == ROLE_OPTIONAL_EXOGENOUS],
+        key=lambda f: f.concept,
+    )
 
 
-def get_experimental_features() -> list[FeatureSpec]:
-    return [f for f in FEATURE_REGISTRY.values() if f.availability_class == "experimental"]
+def get_all_features() -> list[FeatureSpec]:
+    return sorted(FEATURE_REGISTRY.values(), key=lambda f: f.concept)
 
 
 __all__ = [
-    "FeatureSpec", "FEATURE_REGISTRY", "get_feature", "get_feature_by_concept",
-    "get_all_features", "get_mandatory_features", "get_optional_features",
-    "get_experimental_features",
+    "FeatureSpec", "FEATURE_REGISTRY", "get_feature", "get_target_feature",
+    "get_core_features", "get_core_exogenous", "get_optional_features",
+    "get_all_features", "ROLE_TARGET", "ROLE_CORE_EXOGENOUS", "ROLE_OPTIONAL_EXOGENOUS",
 ]

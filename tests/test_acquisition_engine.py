@@ -1,65 +1,74 @@
-"""Tests for the acquisition engine (Component 5) with mocked adapters."""
+"""Tests for the acquisition engine: coverage-gating + source fallback."""
 import tempfile
 import unittest
 from unittest import mock
 
-from acquisition_engine import (
-    acquire_feature,
-    run_acquisition,
-)
-from coverage_engine import ACCESS_REQUIRES_AUTH
+from connectors.base import AcquisitionOutcome, EndpointVerification, SUCCESS, VERIFIED
+from acquisition_engine import acquire_feature
 
 
-def _fake_adapter(country, output, start, end, credentials=None):
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_text("iso3,value\n%s,1\n" % country, encoding="utf-8")
-    return 1, "SUCCESS", "fake ok"
+def _ok_connector(country, feature, start, end, credentials, out_dir, **kw):
+    return (
+        EndpointVerification(source_id="x", country=country, feature=feature, status=VERIFIED, message="ok"),
+        AcquisitionOutcome(source_id="x", country=country, feature=feature, status=SUCCESS,
+                           message="ok", records=12, frequency="monthly"),
+    )
+
+
+def _bulk_connector(country, feature, start, end, credentials, out_dir, **kw):
+    return (
+        EndpointVerification(source_id="x", country=country, feature=feature, status="BULK_MANUAL", message="deferred"),
+        AcquisitionOutcome(source_id="x", country=country, feature=feature, status="BULK_MANUAL",
+                           message="deferred"),
+    )
+
+
+def _fail_connector(country, feature, start, end, credentials, out_dir, **kw):
+    return (
+        EndpointVerification(source_id="x", country=country, feature=feature, status="PORTAL_HTML",
+                             message="HTML portal, not data"),
+        AcquisitionOutcome(source_id="x", country=country, feature=feature, status="NON_DATA_RESPONSE",
+                           message="HTML portal, not data"),
+    )
 
 
 class AcquireFeatureTest(unittest.TestCase):
-    def test_pending_source_returns_adapter_pending(self):
-        # VAR_20 (AC) resolves to IEA (restricted) — but let's force a pending path
-        # by acquiring a feature whose best source has no adapter and no auth.
-        with mock.patch.dict("acquisition_engine.ADAPTERS", {}, clear=False):
-            result = acquire_feature("VAR_20", "DEU", 2000, 2024, tempfile.mkdtemp())
-        # IEA is restricted -> coverage engine flags ACCESS_REQUIRES_AUTH, no download.
-        self.assertEqual(result.status, ACCESS_REQUIRES_AUTH)
+    def test_skips_unsupported_feature_without_http(self):
+        # electricity_prices for USA: eurostat NOT_SUPPORTED, iea restricted -> AUTH_REQUIRED, no HTTP.
+        result = acquire_feature("electricity_prices", "USA", 2000, 2024, tempfile.mkdtemp())
+        self.assertEqual(result.status, "AUTH_REQUIRED")
+        self.assertEqual(result.records, 0)
 
-    def test_skip_known_unavailable(self):
-        # VAR_18 (prices) for KEN: Eurostat not covered, IEA restricted -> skip, no HTTP.
-        with mock.patch.dict("acquisition_engine.ADAPTERS", {}, clear=False):
-            result = acquire_feature("VAR_18", "KEN", 2000, 2024, tempfile.mkdtemp())
-        self.assertEqual(result.status, ACCESS_REQUIRES_AUTH)
-        self.assertIn("Skipped", result.message)
-
-    def test_mocked_adapter_dispatch(self):
-        with mock.patch.dict(
-            "acquisition_engine.ADAPTERS",
-            {"Ember": _fake_adapter, "NASA POWER": _fake_adapter},
-            clear=False,
-        ):
-            result = acquire_feature("VAR_01", "EGY", 2000, 2024, tempfile.mkdtemp())
+    def test_mock_success(self):
+        with mock.patch("acquisition_engine.get_connector", return_value=_ok_connector):
+            result = acquire_feature("electricity_demand", "EGY", 2000, 2024, tempfile.mkdtemp(),
+                                     credentials={"EMBER_API_KEY": "x"})
             self.assertEqual(result.status, "SUCCESS")
-            self.assertEqual(result.source, "Ember")
-            self.assertEqual(result.records, 1)
+            self.assertEqual(result.records, 12)
 
+    def test_fallback_from_bulk_to_next_source(self):
+        # First candidate returns BULK_MANUAL, second succeeds.
+        conns = {"aemo": _bulk_connector, "ember": _ok_connector}
+        with mock.patch("acquisition_engine.get_connector", side_effect=lambda sid: conns.get(sid)):
+            result = acquire_feature("electricity_demand", "AUS", 2000, 2024, tempfile.mkdtemp(),
+                                     credentials={"EMBER_API_KEY": "x"})
+            self.assertEqual(result.status, "SUCCESS")
+            self.assertEqual(result.source_name, "Ember")  # fell back from AEMO
 
-class RunAcquisitionTest(unittest.TestCase):
-    def test_run_returns_results_for_all_features(self):
-        with mock.patch.dict(
-            "acquisition_engine.ADAPTERS",
-            {"Ember": _fake_adapter, "NASA POWER": _fake_adapter},
-            clear=False,
-        ):
-            results = run_acquisition(
-                countries=["EGY"], start=2000, end=2024,
-                output_dir=tempfile.mkdtemp(),
-                feature_ids=["VAR_01", "VAR_20"],  # demand + AC (restricted)
-            )
-        self.assertEqual(len(results), 2)
-        statuses = {r.feature_id: r.status for r in results}
-        self.assertEqual(statuses["VAR_01"], "SUCCESS")
-        self.assertEqual(statuses["VAR_20"], ACCESS_REQUIRES_AUTH)
+    def test_fallback_past_failed_verification(self):
+        conns = {"entsoe": _fail_connector, "ember": _ok_connector}
+        with mock.patch("acquisition_engine.get_connector", side_effect=lambda sid: conns.get(sid)):
+            result = acquire_feature("electricity_demand", "DEU", 2000, 2024, tempfile.mkdtemp(),
+                                     credentials={"ENTSOE_API_TOKEN": "x", "EMBER_API_KEY": "x"})
+            self.assertEqual(result.status, "SUCCESS")
+            self.assertEqual(result.source_name, "Ember")
+
+    def test_all_failed_reports_highest_priority_failure(self):
+        conns = {"entsoe": _fail_connector, "eia": _fail_connector}
+        with mock.patch("acquisition_engine.get_connector", side_effect=lambda sid: conns.get(sid)):
+            result = acquire_feature("electricity_demand", "DEU", 2000, 2024, tempfile.mkdtemp(),
+                                     credentials={"ENTSOE_API_TOKEN": "x"})
+            self.assertEqual(result.status, "NON_DATA_RESPONSE")
 
 
 if __name__ == "__main__":

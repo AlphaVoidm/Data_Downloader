@@ -22,6 +22,11 @@ class NormalizeCountryTest(unittest.TestCase):
     def test_unknown(self):
         self.assertIsNone(normalize_country("Atlantis"))
 
+    def test_non_country_words_do_not_match(self):
+        # Regression: header words must not fuzzy-match a country.
+        self.assertIsNone(normalize_country("Country"))
+        self.assertIsNone(normalize_country("Continent"))
+
     def test_coordinates(self):
         self.assertIsNotNone(get_country_coordinates("EGY"))
         self.assertEqual(get_country_name("EGY"), "Egypt")

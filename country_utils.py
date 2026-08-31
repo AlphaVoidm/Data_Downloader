@@ -265,12 +265,24 @@ def normalize_country(value: str) -> str | None:
     if c:
         return c.alpha_3
 
-    # 6. Fuzzy pycountry search
+    # 6. Fuzzy matching with an explicit similarity threshold so that
+    #    non-country words ("Country", "Continent", headers) are not
+    #    spuriously matched to a country.
     try:
-        matches = pycountry.countries.search_fuzzy(value.strip())
-        if matches:
-            return matches[0].alpha_3
-    except LookupError:
+        import difflib
+        target = cleaned_clean
+        candidates: dict[str, str] = {}
+        for c in pycountry.countries:
+            for name in (c.name, getattr(c, "official_name", None), getattr(c, "common_name", None)):
+                if name:
+                    candidates[name.casefold()] = c.alpha_3
+        for alias in COUNTRY_ALIASES:
+            candidates[alias.casefold()] = COUNTRY_ALIASES[alias]
+
+        close = difflib.get_close_matches(target, candidates.keys(), n=1, cutoff=0.72)
+        if close:
+            return candidates[close[0]]
+    except Exception:
         pass
 
     return None

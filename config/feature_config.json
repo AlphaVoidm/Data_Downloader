@@ -1,0 +1,206 @@
+{
+  "_meta": {
+    "note": "HGT-QF feature configuration. `role` is one of TARGET | CORE_EXOGENOUS | OPTIONAL_EXOGENOUS. `sources` is the FEATURE-SPECIFIC ordered priority list (first = preferred). `country_overrides` re-orders sources for specific countries. `derived_from` marks features computed at extraction time from a parent feature (data extraction, not ML preprocessing)."
+  },
+  "targets": [
+    {
+      "concept": "electricity_demand",
+      "name": "Electricity Demand (Total Load)",
+      "domain": "electricity",
+      "frequency": "monthly",
+      "unit": "TWh",
+      "sources": ["entsoe", "eia", "neso", "aemo", "ember"],
+      "country_overrides": {
+        "GBR": ["neso", "entsoe", "ember"]
+      },
+      "min_history_months": 120,
+      "demand_priority": true
+    }
+  ],
+  "core_exogenous": [
+    {
+      "concept": "temperature_2m",
+      "name": "Air Temperature at 2m",
+      "domain": "climate",
+      "frequency": "monthly",
+      "unit": "°C",
+      "sources": ["era5", "nasa_power"]
+    },
+    {
+      "concept": "solar_radiation",
+      "name": "Solar Radiation (Surface Shortwave)",
+      "domain": "climate",
+      "frequency": "monthly",
+      "unit": "kWh/m²/day",
+      "sources": ["era5", "nasa_power"]
+    },
+    {
+      "concept": "wind_speed_10m",
+      "name": "Wind Speed at 10m",
+      "domain": "climate",
+      "frequency": "monthly",
+      "unit": "m/s",
+      "sources": ["era5", "nasa_power"]
+    },
+    {
+      "concept": "precipitation",
+      "name": "Precipitation Total",
+      "domain": "climate",
+      "frequency": "monthly",
+      "unit": "mm",
+      "sources": ["era5", "nasa_power"]
+    },
+    {
+      "concept": "gdp",
+      "name": "Gross Domestic Product (GDP)",
+      "domain": "economic",
+      "frequency": "annual",
+      "unit": "current USD",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "gdp_growth",
+      "name": "GDP Growth Rate",
+      "domain": "economic",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "gdp_per_capita",
+      "name": "GDP Per Capita",
+      "domain": "economic",
+      "frequency": "annual",
+      "unit": "current USD",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "inflation_cpi",
+      "name": "Inflation (Consumer Price Index)",
+      "domain": "economic",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "total_population",
+      "name": "Total Population",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "count",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "population_growth",
+      "name": "Population Growth Rate",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "urban_population",
+      "name": "Urban Population",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "count",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "urbanisation_rate",
+      "name": "Urbanisation Share (% of Total)",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "total_electricity_generation",
+      "name": "Total Electricity Generation",
+      "domain": "energy_system",
+      "frequency": "monthly",
+      "unit": "TWh",
+      "sources": ["ember", "world_bank"]
+    },
+    {
+      "concept": "renewable_generation_share",
+      "name": "Renewable Electricity Generation Share",
+      "domain": "energy_system",
+      "frequency": "monthly",
+      "unit": "%",
+      "sources": ["ember", "irena"]
+    },
+    {
+      "concept": "generation_mix",
+      "name": "Generation Mix by Fuel",
+      "domain": "energy_system",
+      "frequency": "monthly",
+      "unit": "TWh",
+      "sources": ["ember"]
+    },
+    {
+      "concept": "electricity_access",
+      "name": "Electricity Access (% of Population)",
+      "domain": "energy_system",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "manufacturing_value_added",
+      "name": "Manufacturing Value Added (% of GDP)",
+      "domain": "economic_structure",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "cooling_degree_days",
+      "name": "Cooling Degree Days (CDD)",
+      "domain": "derived_climate",
+      "frequency": "monthly",
+      "unit": "degree-days",
+      "sources": ["nasa_power", "era5"],
+      "derived_from": "temperature_2m",
+      "min_source_frequency": "daily",
+      "note": "Computed from DAILY temperature at extraction time (base 18°C). Requires a daily-capable temperature source."
+    },
+    {
+      "concept": "heating_degree_days",
+      "name": "Heating Degree Days (HDD)",
+      "domain": "derived_climate",
+      "frequency": "monthly",
+      "unit": "degree-days",
+      "sources": ["nasa_power", "era5"],
+      "derived_from": "temperature_2m",
+      "min_source_frequency": "daily",
+      "note": "Computed from DAILY temperature at extraction time (base 18°C). Requires a daily-capable temperature source."
+    }
+  ],
+  "optional_exogenous": [
+    {
+      "concept": "electricity_prices",
+      "name": "Retail / Wholesale Electricity Prices",
+      "domain": "energy_system",
+      "frequency": "monthly",
+      "unit": "EUR/kWh",
+      "sources": ["eurostat", "iea"]
+    },
+    {
+      "concept": "ev_stock_sales",
+      "name": "Electric Vehicle (EV) Stock and Sales",
+      "domain": "transport",
+      "frequency": "annual",
+      "unit": "vehicles",
+      "sources": ["owid", "iea"]
+    },
+    {
+      "concept": "sectoral_electricity_demand",
+      "name": "Sectoral Electricity Demand",
+      "domain": "built_environment",
+      "frequency": "annual",
+      "unit": "GWh",
+      "sources": ["eurostat", "iea", "eia"]
+    }
+  ]
+}
