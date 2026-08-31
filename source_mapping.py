@@ -13,12 +13,14 @@ from typing import Any
 
 from country_utils import get_country_coordinates
 
-CONFIG_DIR = Path(__file__).parent / "config"
-# Also check project root config/ if local config/ is missing (supports both dev and deployment)
+_ROOT = Path(__file__).parent
+CONFIG_DIR = _ROOT / "config"
+# Resolve config directory: config/ preferred, then repo root, then legacy alt path.
 if not (CONFIG_DIR / "source_area_mapping.csv").exists():
-    _alt = Path("/home/claude/config")
-    if (_alt / "source_area_mapping.csv").exists():
-        CONFIG_DIR = _alt
+    for _alt in (_ROOT, Path("/home/claude/config")):
+        if (_alt / "source_area_mapping.csv").exists():
+            CONFIG_DIR = _alt
+            break
 AREA_MAPPING_CSV = CONFIG_DIR / "source_area_mapping.csv"
 
 
@@ -150,9 +152,20 @@ def validate_source_capability(iso3: str, source_name: str) -> tuple[str, str]:
         else:
             return "SOURCE_NOT_COVERED", f"ENTSO-E Transparency covers European electricity market areas only, not {iso3_clean}"
 
-    # 4. Research Tier Sources
-    if any(term in s_norm for term in ["era5", "cmip6", "iiasa", "gpwv4"]):
-        return "RESEARCH_TIER", f"{source_name} is a Research-Tier bulk raster/scenario dataset requiring batch extraction"
+    # 4. Global Gridded Datasets (ERA5 / CMIP6 / GPWv4) — covered everywhere,
+    #    acquired via spatial-subset extraction (country bbox), never a
+    #    country-level file lookup.
+    if "era5" in s_norm or "cds" in s_norm:
+        return "OK", f"{source_name} is globally gridded; acquired via country bbox spatial-subset extraction"
+    if "cmip6" in s_norm:
+        return "OK", f"{source_name} is globally gridded; acquired via model/experiment + country bbox spatial-subset extraction"
+    if "gpw" in s_norm or "gpwv4" in s_norm:
+        return "OK", f"{source_name} is a global raster; acquired via country bbox zonal statistics"
+
+    # 5. Global Scenario/Bulk Datasets (IIASA SSP) — covered everywhere,
+    #    acquired by caching the bulk file once and extracting country rows.
+    if "iiasa" in s_norm or "ssp" in s_norm:
+        return "OK", f"{source_name} is a global scenario dataset; acquired via bulk cache + country-row extraction"
 
     return "SOURCE_NOT_COVERED", f"No verified coverage mapping for {source_name} on {iso3_clean}"
 

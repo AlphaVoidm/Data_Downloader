@@ -1,0 +1,769 @@
+{
+  "_meta": {
+    "note": "Centralized HGT-QF source registry. Keys are source_id values referenced by config/feature_config.json. `coverage.discovery` describes how supported countries are determined (explicit mapping vs. dynamic metadata/facet discovery). Feature-specific priorities live in feature_config.json (ordered `sources` lists); the `priority` field here is a hint only."
+  },
+  "entsoe": {
+    "source_id": "entsoe",
+    "source_name": "ENTSO-E Transparency",
+    "provider": "European Network of Transmission System Operators for Electricity",
+    "dataset_name": "Actual Total Load [6.1.A]",
+    "organization": "ENTSO-E",
+    "features": [
+      "electricity_demand"
+    ],
+    "coverage": {
+      "scope": "europe_bidding_zones",
+      "description": "35+ European bidding zones / control areas",
+      "discovery": "explicit EIC area-code mapping (config/source_area_mapping.csv)"
+    },
+    "frequencies": [
+      "hourly"
+    ],
+    "historical": {
+      "start": 2014,
+      "end": 2026
+    },
+    "auth": {
+      "required": true,
+      "type": "api_token",
+      "env": "ENTSOE_API_TOKEN",
+      "param": "securityToken"
+    },
+    "endpoint": "https://web-api.tp.entsoe.eu/api",
+    "dataset_id": "A65 (System total load), A16 (Realised)",
+    "country_mapping": "ISO-3 -> EIC code via source_area_mapping.csv; MAPPING_REQUIRED when absent",
+    "unit": "MW",
+    "priority": {
+      "electricity_demand": 1
+    },
+    "documentation_url": "https://transparency.entsoe.eu/content/static_content/Static%20content/web%20api/Guide.html",
+    "access_method": "HTTP GET returning XML",
+    "rate_limit": "No strict published limit; use sequential requests with retry/backoff on 429/503",
+    "license": "ENTSO-E Terms of Use (free for research)",
+    "academic_relevance": "Primary source for hourly European electricity demand",
+    "public_access": "free_api_token",
+    "api_available": true,
+    "notes": "GB data limited post-Brexit (Jan 2021); use NESO for current GB demand. Correct param: outBiddingZone_Domain.",
+    "acquisition_mode": "country_api",
+    "role": "primary"
+  },
+  "eia": {
+    "source_id": "eia",
+    "source_name": "EIA Open Data",
+    "provider": "U.S. Energy Information Administration",
+    "dataset_name": "Hourly Electric Grid Monitor",
+    "organization": "U.S. EIA",
+    "features": [
+      "electricity_demand",
+      "sectoral_electricity_demand"
+    ],
+    "coverage": {
+      "scope": "united_states",
+      "description": "United States (balancing authorities / regions)",
+      "discovery": "dynamic metadata/facet discovery (respondent, type) via API v2"
+    },
+    "frequencies": [
+      "hourly"
+    ],
+    "historical": {
+      "start": 2015,
+      "end": 2026
+    },
+    "auth": {
+      "required": true,
+      "type": "api_key",
+      "env": "EIA_API_KEY",
+      "param": "api_key"
+    },
+    "endpoint": "https://api.eia.gov/v2/electricity/rto/region-data/data/",
+    "dataset_id": "electricity/rto/region-data",
+    "country_mapping": "USA -> respondent codes discovered from facets (US48 default for contiguous US)",
+    "unit": "MWh",
+    "priority": {
+      "electricity_demand": 2
+    },
+    "documentation_url": "https://www.eia.gov/opendata/",
+    "access_method": "HTTP GET returning JSON (API v2)",
+    "rate_limit": "~2,000 requests/hour per key (typical); throttle + retry/backoff",
+    "license": "U.S. Government Open Data (public domain)",
+    "academic_relevance": "Official U.S. federal energy statistics",
+    "public_access": "free_api_key",
+    "api_available": true,
+    "notes": "Do NOT hard-code one series; use facet discovery to find available respondents/types.",
+    "acquisition_mode": "country_api",
+    "role": "primary"
+  },
+  "neso": {
+    "source_id": "neso",
+    "source_name": "ESO / NESO",
+    "provider": "National Energy System Operator (Great Britain)",
+    "dataset_name": "Historic Demand Data",
+    "organization": "NESO",
+    "features": [
+      "electricity_demand"
+    ],
+    "coverage": {
+      "scope": "great_britain",
+      "description": "Great Britain (England / Scotland / Wales)",
+      "discovery": "fixed national scope"
+    },
+    "frequencies": [
+      "half-hourly"
+    ],
+    "historical": {
+      "start": 2009,
+      "end": 2026
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://api.neso.energy/api/3/action/package_show?id=historic-demand-data",
+    "dataset_id": "historic-demand-data",
+    "country_mapping": "GBR -> package resources (per-year CSV URLs discovered from package metadata)",
+    "unit": "MW",
+    "priority": {
+      "electricity_demand": 3
+    },
+    "documentation_url": "https://www.neso.energy/data-portal",
+    "access_method": "HTTP GET returning JSON (CKAN) -> per-year CSV files",
+    "rate_limit": "None strict; sequential downloads",
+    "license": "Open Government Licence v3.0",
+    "academic_relevance": "Primary source for GB half-hourly demand",
+    "public_access": "open",
+    "api_available": true,
+    "notes": "Rebranded from National Grid ESO in 2024. Columns ND / TSD.",
+    "acquisition_mode": "country_api",
+    "role": "primary"
+  },
+  "aemo": {
+    "source_id": "aemo",
+    "source_name": "AEMO",
+    "provider": "Australian Energy Market Operator",
+    "dataset_name": "Market Management System (MMS) - Demand",
+    "organization": "AEMO",
+    "features": [
+      "electricity_demand"
+    ],
+    "coverage": {
+      "scope": "australia_nem",
+      "description": "Australia NEM regions (NSW1/QLD1/SA1/TAS1/VIC1)",
+      "discovery": "fixed national scope (NEM market regions)"
+    },
+    "frequencies": [
+      "five-minute"
+    ],
+    "historical": {
+      "start": 1998,
+      "end": 2026
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://aemo.com.au/en/energy-systems/electricity/national-electricity-market-nem/data-nem",
+    "dataset_id": "MMS DISPATCHREGIONSUM / PRICE_AND_DEMAND",
+    "country_mapping": "AUS -> NEM region codes",
+    "unit": "MW",
+    "priority": {
+      "electricity_demand": 4
+    },
+    "documentation_url": "https://aemo.com.au/energy-systems/electricity/national-electricity-market-nem/data-nem/market-management-system-mms-data",
+    "access_method": "HTTP file downloads (CSV) via NEMWEB",
+    "rate_limit": "None strict; bulk file downloads",
+    "license": "AEMO Data Terms (non-commercial research permitted)",
+    "academic_relevance": "Official Australian market operator data",
+    "public_access": "open",
+    "api_available": false,
+    "notes": "5-minute dispatch; aggregate to monthly for HGT-QF.",
+    "acquisition_mode": "bulk_dataset",
+    "role": "primary"
+  },
+  "ember": {
+    "source_id": "ember",
+    "source_name": "Ember",
+    "provider": "Ember Climate",
+    "dataset_name": "Monthly Electricity Data",
+    "organization": "Ember",
+    "features": [
+      "electricity_demand",
+      "total_electricity_generation",
+      "renewable_generation_share",
+      "generation_mix"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Global: ~215 yearly geographies, ~88 monthly geographies",
+      "discovery": "explicit monthly-geography set (config/ember_monthly_geographies.csv); annual otherwise"
+    },
+    "frequencies": [
+      "monthly",
+      "annual"
+    ],
+    "historical": {
+      "start": 2000,
+      "end": 2026
+    },
+    "auth": {
+      "required": true,
+      "type": "api_key",
+      "env": "EMBER_API_KEY",
+      "param": "api_key (query parameter)"
+    },
+    "endpoint": "https://api.ember-energy.org/v1/electricity-demand/monthly",
+    "dataset_id": "ember electricity-demand / electricity-generation (monthly)",
+    "country_mapping": "ISO-3 or country name -> entity query parameter",
+    "unit": "TWh",
+    "priority": {
+      "electricity_demand": 5,
+      "total_electricity_generation": 1,
+      "renewable_generation_share": 1,
+      "generation_mix": 1
+    },
+    "documentation_url": "https://ember-energy.org/data/monthly-electricity-data/",
+    "access_method": "HTTP GET returning JSON (API) or bulk CSV catalogue",
+    "rate_limit": "Rate limited per key; retry/backoff on 429",
+    "license": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "academic_relevance": "Global monthly demand/generation comparisons across countries",
+    "public_access": "open_api_key",
+    "api_available": true,
+    "notes": "Monthly coverage is narrower than annual; never treat annual as monthly.",
+    "acquisition_mode": "country_api",
+    "role": "primary"
+  },
+  "world_bank": {
+    "source_id": "world_bank",
+    "source_name": "World Bank",
+    "provider": "World Bank Group",
+    "dataset_name": "World Development Indicators (WDI)",
+    "organization": "World Bank",
+    "features": [
+      "gdp",
+      "gdp_growth",
+      "gdp_per_capita",
+      "inflation_cpi",
+      "total_population",
+      "population_growth",
+      "urban_population",
+      "urbanisation_rate",
+      "electricity_access",
+      "manufacturing_value_added",
+      "total_electricity_generation"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "200+ countries",
+      "discovery": "ISO-3 country code lookup (API returns empty list when unsupported)"
+    },
+    "frequencies": [
+      "annual"
+    ],
+    "historical": {
+      "start": 1960,
+      "end": 2024
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://api.worldbank.org/v2/country/{iso3}/indicator/{code}",
+    "dataset_id": "WDI indicator codes (NY.GDP.MKTP.CD, SP.POP.TOTL, EG.ELC.ACCS.ZS, ...)",
+    "country_mapping": "ISO-3 direct",
+    "unit": "varies by indicator",
+    "priority": {
+      "gdp": 1,
+      "gdp_growth": 1,
+      "gdp_per_capita": 1,
+      "inflation_cpi": 1,
+      "total_population": 1,
+      "population_growth": 1,
+      "urban_population": 1,
+      "urbanisation_rate": 1,
+      "electricity_access": 1,
+      "manufacturing_value_added": 1,
+      "total_electricity_generation": 2
+    },
+    "documentation_url": "https://datahelpdesk.worldbank.org/knowledgebase/articles/889392-about-the-indicators-api-documentation",
+    "access_method": "HTTP GET returning JSON",
+    "rate_limit": "None strict; use per_page=1000 and paginate",
+    "license": "Creative Commons Attribution 4.0 (CC BY 4.0)",
+    "academic_relevance": "Standard cross-country macroeconomic/demographic panel",
+    "public_access": "open",
+    "api_available": true,
+    "notes": "Annual only. Electricity generation via EG.ELC.PROD.KH is annual (coarser than Ember monthly).",
+    "acquisition_mode": "country_api",
+    "role": "primary"
+  },
+  "nasa_power": {
+    "source_id": "nasa_power",
+    "source_name": "NASA POWER",
+    "provider": "NASA Langley Research Center",
+    "dataset_name": "POWER Project Daily Meteorological Data",
+    "organization": "NASA",
+    "features": [
+      "temperature_2m",
+      "solar_radiation",
+      "wind_speed_10m",
+      "precipitation"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Global point/bbox queries (MERRA-2 reanalysis)",
+      "discovery": "centroid / bounding box from country registry"
+    },
+    "frequencies": [
+      "daily"
+    ],
+    "historical": {
+      "start": 1981,
+      "end": 2026
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://power.larc.nasa.gov/api/temporal/daily/point",
+    "dataset_id": "T2M, ALLSKY_SFC_SW_DWN, WS10M, PRECTOTCORR",
+    "country_mapping": "ISO-3 -> centroid (lat/lon)",
+    "unit": "\u00b0C / kWh/m\u00b2/day / m/s / mm/day",
+    "priority": {
+      "temperature_2m": 2,
+      "solar_radiation": 2,
+      "wind_speed_10m": 2,
+      "precipitation": 2
+    },
+    "documentation_url": "https://power.larc.nasa.gov/docs/",
+    "access_method": "HTTP GET returning JSON",
+    "rate_limit": "None strict; sequential queries",
+    "license": "NASA Open Data (public domain)",
+    "academic_relevance": "Global no-key climate fallback (MERRA-2)",
+    "public_access": "open",
+    "api_available": true,
+    "notes": "Point query at country centroid (coarser spatial rep than ERA5 bbox). Sentinel -999.0 = missing.",
+    "acquisition_mode": "point_api",
+    "role": "primary"
+  },
+  "era5": {
+    "source_id": "era5",
+    "source_name": "ERA5 / CDS",
+    "provider": "ECMWF / Copernicus Climate Change Service",
+    "dataset_name": "ERA5 monthly averaged data on single levels",
+    "organization": "Copernicus C3S",
+    "features": [
+      "temperature_2m",
+      "solar_radiation",
+      "wind_speed_10m",
+      "precipitation"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Global gridded reanalysis; acquired via TARGETED bbox/variable/period CDS request -> country-level spatial aggregation -> discard raw NetCDF",
+      "discovery": "country bounding box from country registry"
+    },
+    "frequencies": [
+      "monthly",
+      "hourly"
+    ],
+    "historical": {
+      "start": 1940,
+      "end": 2026
+    },
+    "auth": {
+      "required": true,
+      "type": "cds_credentials",
+      "env": "CDS_API_KEY",
+      "param": "cdsapi client"
+    },
+    "endpoint": "https://cds.climate.copernicus.eu/api",
+    "dataset_id": "reanalysis-era5-single-levels-monthly-means",
+    "country_mapping": "ISO-3 -> bounding box (area: north/west/south/east)",
+    "unit": "varies (K -> \u00b0C converted at extraction)",
+    "priority": {
+      "temperature_2m": 1,
+      "solar_radiation": 1,
+      "wind_speed_10m": 1,
+      "precipitation": 1
+    },
+    "documentation_url": "https://cds.climate.copernicus.eu/datasets/reanalysis-era5-single-levels-monthly-means",
+    "access_method": "cdsapi retrieve -> temporary NetCDF -> extract -> delete",
+    "rate_limit": "CDS request queue; targeted bbox requests are small",
+    "license": "Copernicus licence (free for research)",
+    "academic_relevance": "Gold-standard reanalysis; area-weighted country aggregates",
+    "public_access": "credentialed",
+    "api_available": true,
+    "notes": "Globally gridded reanalysis; acquired via connectors/era5.py (country bbox -> CDS sub-region request -> area-weighted monthly aggregate -> compact Parquet; temp NetCDF deleted).",
+    "acquisition_mode": "grid_spatial_subset",
+    "role": "fallback"
+  },
+  "nager": {
+    "source_id": "nager",
+    "source_name": "Nager.Date",
+    "provider": "Nager.Date",
+    "dataset_name": "Public Holiday API",
+    "organization": "Nager.Date",
+    "features": [
+      "public_holidays"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "100+ countries",
+      "discovery": "ISO-2 code lookup"
+    },
+    "frequencies": [
+      "annual"
+    ],
+    "historical": {
+      "start": 2000,
+      "end": 2030
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://date.nager.at/api/v3/PublicHolidays/{year}/{iso2}",
+    "dataset_id": "PublicHolidays v3",
+    "country_mapping": "ISO-3 -> ISO-2",
+    "unit": "calendar_flag",
+    "priority": {
+      "public_holidays": 1
+    },
+    "documentation_url": "https://date.nager.at/swagger/index.html",
+    "access_method": "HTTP GET returning JSON",
+    "rate_limit": "None strict",
+    "license": "MIT License",
+    "academic_relevance": "Optional calendar feature",
+    "public_access": "open",
+    "api_available": true,
+    "notes": "Optional (not core).",
+    "acquisition_mode": "country_api",
+    "role": "optional"
+  },
+  "eurostat": {
+    "source_id": "eurostat",
+    "source_name": "Eurostat",
+    "provider": "European Commission (Eurostat)",
+    "dataset_name": "Energy Statistics (nrg_cb_e / nrg_pc_204)",
+    "organization": "Eurostat",
+    "features": [
+      "electricity_prices",
+      "sectoral_electricity_demand"
+    ],
+    "coverage": {
+      "scope": "eu27_plus",
+      "description": "EU-27 + EFTA + UK",
+      "discovery": "ISO-3 -> Eurostat geo code (2-letter)"
+    },
+    "frequencies": [
+      "monthly",
+      "annual"
+    ],
+    "historical": {
+      "start": 1990,
+      "end": 2026
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://ec.europa.eu/eurostat/api/dissemination/statistics/1.0/data/{dataset}",
+    "dataset_id": "nrg_cb_e (electricity consumption), nrg_pc_204 (prices)",
+    "country_mapping": "ISO-3 -> Eurostat 2-letter geo code",
+    "unit": "GWh / EUR/kWh",
+    "priority": {
+      "electricity_prices": 1,
+      "sectoral_electricity_demand": 1
+    },
+    "documentation_url": "https://ec.europa.eu/eurostat/data/database",
+    "access_method": "HTTP GET returning JSON (dissemination API)",
+    "rate_limit": "None strict",
+    "license": "European Commission reuse policy",
+    "academic_relevance": "EU prices / sectoral demand",
+    "public_access": "open",
+    "api_available": true,
+    "notes": "Optional features only.",
+    "acquisition_mode": "country_api",
+    "role": "optional"
+  },
+  "owid": {
+    "source_id": "owid",
+    "source_name": "Our World in Data",
+    "provider": "Our World in Data",
+    "dataset_name": "Electric car stock (OWID)",
+    "organization": "OWID",
+    "features": [
+      "ev_stock_sales"
+    ],
+    "coverage": {
+      "scope": "ev_countries",
+      "description": "~60 countries with EV stock data",
+      "discovery": "explicit country set (config/owid_ev_countries.csv)"
+    },
+    "frequencies": [
+      "annual"
+    ],
+    "historical": {
+      "start": 1990,
+      "end": 2026
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://raw.githubusercontent.com/owid/owid-datasets/master/datasets/Electric%20car%20stock%20-%20IEA%20(2024)/Electric%20car%20stock%20-%20IEA%20(2024).csv",
+    "dataset_id": "Electric car stock - IEA",
+    "country_mapping": "ISO-3 -> OWID entity name",
+    "unit": "vehicles",
+    "priority": {
+      "ev_stock_sales": 1
+    },
+    "documentation_url": "https://github.com/owid/owid-datasets",
+    "access_method": "HTTP GET returning CSV",
+    "rate_limit": "None strict",
+    "license": "CC BY 4.0",
+    "academic_relevance": "Global EV stock",
+    "public_access": "open",
+    "api_available": false,
+    "notes": "Optional feature only. CSV source.",
+    "acquisition_mode": "bulk_dataset",
+    "role": "optional"
+  },
+  "irena": {
+    "source_id": "irena",
+    "source_name": "IRENA",
+    "provider": "International Renewable Energy Agency",
+    "dataset_name": "Renewable Energy Statistics",
+    "organization": "IRENA",
+    "features": [
+      "renewable_generation_share"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Global (annual)",
+      "discovery": "country name lookup in bulk dataset"
+    },
+    "frequencies": [
+      "annual"
+    ],
+    "historical": {
+      "start": 2000,
+      "end": 2024
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://www.irena.org/Data/Downloads",
+    "dataset_id": "IRENA Renewable Energy Statistics (bulk CSV)",
+    "country_mapping": "ISO-3 -> country name",
+    "unit": "MW / %",
+    "priority": {
+      "renewable_generation_share": 2
+    },
+    "documentation_url": "https://www.irena.org/Data",
+    "access_method": "Bulk CSV download (no stable API)",
+    "rate_limit": "n/a",
+    "license": "IRENA Data Terms",
+    "academic_relevance": "Renewable share fallback (annual)",
+    "public_access": "open",
+    "api_available": false,
+    "notes": "Annual only; used as fallback for renewable share when Ember monthly is unavailable.",
+    "acquisition_mode": "bulk_dataset",
+    "role": "fallback"
+  },
+  "iea": {
+    "source_id": "iea",
+    "source_name": "IEA",
+    "provider": "International Energy Agency",
+    "dataset_name": "IEA Data & Statistics",
+    "organization": "IEA",
+    "features": [
+      "electricity_prices",
+      "ev_stock_sales",
+      "sectoral_electricity_demand"
+    ],
+    "coverage": {
+      "scope": "variable",
+      "description": "Variable by dataset",
+      "discovery": "not programmatically enumerable"
+    },
+    "frequencies": [
+      "annual",
+      "monthly"
+    ],
+    "historical": {
+      "start": 2000,
+      "end": 2025
+    },
+    "auth": {
+      "required": true,
+      "type": "restricted",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://www.iea.org/data-and-statistics",
+    "dataset_id": "n/a (restricted)",
+    "country_mapping": "variable",
+    "unit": "varies",
+    "priority": {
+      "electricity_prices": 2,
+      "ev_stock_sales": 2,
+      "sectoral_electricity_demand": 2
+    },
+    "documentation_url": "https://www.iea.org/data-and-statistics",
+    "access_method": "restricted (subscription / licensing)",
+    "rate_limit": "n/a",
+    "license": "IEA Terms of Use",
+    "academic_relevance": "Prices / EV / sectoral demand (restricted)",
+    "public_access": "restricted",
+    "api_available": false,
+    "notes": "Restricted access: discovery status AUTH_REQUIRED unless a licensing path exists.",
+    "acquisition_mode": "restricted",
+    "role": "restricted"
+  },
+  "cmip6": {
+    "source_id": "cmip6",
+    "source_name": "CMIP6 / CDS",
+    "provider": "WCRP / Copernicus C3S",
+    "dataset_name": "CMIP6 climate projections",
+    "organization": "CMIP6",
+    "features": [],
+    "coverage": {
+      "scope": "global",
+      "description": "Future climate scenario projections",
+      "discovery": "NOT part of the historical acquisition path"
+    },
+    "frequencies": [
+      "monthly"
+    ],
+    "historical": {
+      "start": 2015,
+      "end": 2100
+    },
+    "auth": {
+      "required": true,
+      "type": "cds_credentials",
+      "env": "CDS_API_KEY",
+      "param": "cdsapi client"
+    },
+    "endpoint": "https://cds.climate.copernicus.eu/api",
+    "dataset_id": "projections-cmip6",
+    "country_mapping": "ISO-3 -> bounding box (future scenario module only)",
+    "unit": "varies",
+    "priority": {},
+    "documentation_url": "https://cds.climate.copernicus.eu/datasets/projections-cmip6",
+    "access_method": "cdsapi targeted request (future scenario module)",
+    "rate_limit": "CDS request queue",
+    "license": "CMIP6 terms / CC BY",
+    "academic_relevance": "Future climate scenario analysis only",
+    "public_access": "credentialed",
+    "api_available": true,
+    "acquisition_mode": "grid_spatial_subset",
+    "role": "future_scenario",
+    "notes": "Globally gridded model archive; acquired via connectors/cmip6.py (model + experiment + variable + country bbox spatial-subset -> country-level monthly series). Historical + SSP scenarios."
+  },
+  "gpwv4": {
+    "source_name": "GPWv4",
+    "provider": "NASA SEDAC (CIESIN Columbia)",
+    "dataset_name": "Gridded Population of the World v4",
+    "organization": "CIESIN / NASA SEDAC",
+    "features": [
+      "total_population",
+      "population_density"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Globally gridded population-density raster (30 arc-sec), 2000/2005/2010/2015/2020 epochs",
+      "discovery": "country bbox -> zonal sum of density x cell area"
+    },
+    "frequencies": [
+      "5-year"
+    ],
+    "historical": {
+      "start": 2000,
+      "end": 2020
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://sedac.ciesin.columbia.edu/downloads/data/gpw-v4/gpw-v4-population-density-rev11/",
+    "dataset_id": "gpw-v4-population-density-rev11",
+    "country_mapping": "country bbox (zonal statistics over raster)",
+    "unit": "persons / persons/km2",
+    "priority": {
+      "total_population": 2
+    },
+    "documentation_url": "https://sedac.ciesin.columbia.edu/data/collection/gpw-v4",
+    "access_method": "raster zonal statistics (rasterio)",
+    "rate_limit": "none (bulk GeoTIFF download, cached)",
+    "license": "CC-BY-4.0 (SEDAC)",
+    "academic_relevance": "Population verification source for World Bank totals",
+    "public_access": "open",
+    "api_available": false,
+    "acquisition_mode": "grid_spatial_subset",
+    "role": "fallback",
+    "notes": "Gridded raster; acquired via connectors/gpwv4.py zonal extraction over the country bbox, never a country row lookup."
+  },
+  "iiasa": {
+    "source_name": "IIASA SSP",
+    "provider": "IIASA Energy, Climate, and Environment Program",
+    "dataset_name": "Shared Socioeconomic Pathways (SSP) database",
+    "organization": "IIASA",
+    "features": [
+      "ssp_population",
+      "ssp_gdp",
+      "ssp_urban_population"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Country-level SSP projections (population, GDP, urbanization) 2010-2100",
+      "discovery": "bulk IAMC CSV cached once; extract country ISO-3 rows"
+    },
+    "frequencies": [
+      "5-year"
+    ],
+    "historical": {
+      "start": 2010,
+      "end": 2100
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://data.ece.iiasa.ac.at/ssp/",
+    "dataset_id": "ssp_basic_drivers_release_3.0",
+    "country_mapping": "ISO-3 region codes in the IAMC CSV",
+    "unit": "persons(millions) / billion US$2017 PPP",
+    "priority": {},
+    "documentation_url": "https://tntcat.iiasa.ac.at/SspDb/",
+    "access_method": "bulk CSV.gz download (cached) -> country rows",
+    "rate_limit": "none (bulk file, cached)",
+    "license": "CC-BY (IIASA SSP database)",
+    "academic_relevance": "Future socioeconomic scenarios (SSP1-5)",
+    "public_access": "open",
+    "api_available": true,
+    "acquisition_mode": "bulk_dataset",
+    "role": "future_scenario",
+    "notes": "Scenario-tier bulk dataset; acquired via connectors/iiasa.py (download/cache once, extract country rows). Not in the 2000-2024 historical core."
+  }
+}

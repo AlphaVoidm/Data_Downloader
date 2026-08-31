@@ -1,0 +1,18 @@
+{
+  "_note": "Researcher-adjustable thresholds for TARGET / FEATURE / RESEARCH readiness. These gate RESEARCH_READY classification and which countries become eligible for acquisition. None of this is ML preprocessing — it is discovery/audit configuration.",
+  "target": {
+    "min_history_months": 120,
+    "min_consecutive_months": 120,
+    "require_monthly_resolution": true
+  },
+  "feature_coverage": {
+    "min_core_coverage": 0.8,
+    "min_extended_coverage": 0.0,
+    "require_optional_features": false
+  },
+  "experiment_windows": {
+    "train": [2000, 2015],
+    "calibration": [2016, 2018],
+    "test": [2019, 2024]
+  }
+}

@@ -1,0 +1,195 @@
+iso3,country_name,region,centroid_lat,centroid_lon,bbox_north,bbox_west,bbox_south,bbox_east,bbox_source
+AFG,Afghanistan,Asia,33.9391,67.71,41.9391,57.71,25.9391,77.71,centroid_derived
+AGO,Angola,Africa,-11.2027,17.8739,-4.39,11.68,-18.04,24.08,curated
+ALB,Albania,Europe,41.1533,20.1683,49.1533,10.1683,33.1533,30.1683,centroid_derived
+AND,Andorra,Europe,42.5063,1.5218,50.5063,-8.4782,34.5063,11.5218,centroid_derived
+ARE,United Arab Emirates,Asia,23.4241,53.8478,26.08,51.58,22.63,56.38,curated
+ARG,Argentina,South America,-38.4161,-63.6167,-21.78,-73.56,-55.06,-53.64,curated
+ARM,Armenia,Asia,40.0691,45.0382,48.0691,35.0382,32.0691,55.0382,centroid_derived
+ATG,Antigua and Barbuda,North America,17.0608,-61.7964,25.0608,-71.7964,9.0608,-51.7964,centroid_derived
+AUS,Australia,Oceania,-25.2744,133.7751,-10.06,112.92,-43.63,153.64,curated
+AUT,Austria,Europe,47.5162,14.5501,49.02,9.53,46.37,17.16,curated
+AZE,Azerbaijan,Asia,40.1431,47.5769,48.1431,37.5769,32.1431,57.5769,centroid_derived
+BDI,Burundi,Africa,-3.3731,29.9189,4.6269,19.9189,-11.3731,39.9189,centroid_derived
+BEL,Belgium,Europe,50.5039,4.4699,51.5,2.55,49.5,6.4,curated
+BEN,Benin,Africa,9.3077,2.3158,17.3077,-7.6842,1.3077,12.3158,centroid_derived
+BFA,Burkina Faso,Africa,12.2383,-1.5616,20.2383,-11.5616,4.2383,8.4384,centroid_derived
+BGD,Bangladesh,Asia,23.685,90.3563,26.63,88.01,20.74,92.67,curated
+BGR,Bulgaria,Europe,42.7339,25.4858,44.22,22.36,41.24,28.61,curated
+BHR,Bahrain,Asia,26.0667,50.5577,34.0667,40.5577,18.0667,60.5577,centroid_derived
+BHS,Bahamas,North America,25.0343,-77.3963,33.0343,-87.3963,17.0343,-67.3963,centroid_derived
+BIH,Bosnia and Herzegovina,Europe,43.9159,17.6791,51.9159,7.6791,35.9159,27.6791,centroid_derived
+BLR,Belarus,Europe,53.7098,27.9534,61.7098,17.9534,45.7098,37.9534,centroid_derived
+BLZ,Belize,North America,17.1899,-88.4976,25.1899,-98.4976,9.1899,-78.4976,centroid_derived
+BOL,"Bolivia, Plurinational State of",South America,-16.2902,-63.5887,-9.68,-69.64,-22.9,-57.45,curated
+BRA,Brazil,South America,-14.235,-51.9253,5.27,-73.98,-33.75,-34.79,curated
+BRB,Barbados,North America,13.1939,-59.5432,21.1939,-69.5432,5.1939,-49.5432,centroid_derived
+BRN,Brunei Darussalam,Asia,4.5353,114.7277,12.5353,104.7277,-3.4647,124.7277,centroid_derived
+BTN,Bhutan,Asia,27.5142,90.4336,35.5142,80.4336,19.5142,100.4336,centroid_derived
+BWA,Botswana,Africa,-22.3285,24.6849,-14.3285,14.6849,-30.3285,34.6849,centroid_derived
+CAF,Central African Republic,Africa,6.6111,20.9394,14.6111,10.9394,-1.3889,30.9394,centroid_derived
+CAN,Canada,North America,56.1304,-106.3468,83.11,-141.0,41.68,-52.62,curated
+CHE,Switzerland,Europe,46.8182,8.2275,47.81,5.96,45.82,10.49,curated
+CHL,Chile,South America,-35.6751,-71.543,-17.5,-75.6,-56.54,-66.42,curated
+CHN,China,Asia,35.8617,104.1954,53.56,73.5,18.16,134.77,curated
+CIV,Côte d'Ivoire,Africa,7.54,-5.5471,10.74,-8.6,4.36,-2.49,curated
+CMR,Cameroon,Africa,7.3697,12.3547,13.08,8.49,1.65,16.19,curated
+COD,"Congo, The Democratic Republic of the",Africa,-4.0383,21.7587,3.9617,11.7587,-12.0383,31.7587,centroid_derived
+COG,Congo,Africa,-0.228,15.8277,7.772,5.8277,-8.228,25.8277,centroid_derived
+COL,Colombia,South America,4.5709,-74.2973,13.6,-81.73,-4.23,-66.87,curated
+COM,Comoros,Africa,-11.8753,43.8722,-3.8753,33.8722,-19.8753,53.8722,centroid_derived
+CPV,Cabo Verde,Africa,16.5388,-23.0418,24.5388,-33.0418,8.5388,-13.0418,centroid_derived
+CRI,Costa Rica,North America,9.7489,-83.7534,17.7489,-93.7534,1.7489,-73.7534,centroid_derived
+CUB,Cuba,North America,21.5218,-77.7812,29.5218,-87.7812,13.5218,-67.7812,centroid_derived
+CYP,Cyprus,Europe,35.1264,33.4299,43.1264,23.4299,27.1264,43.4299,centroid_derived
+CZE,Czechia,Europe,49.8175,15.473,51.06,12.09,48.55,18.86,curated
+DEU,Germany,Europe,51.1657,10.4515,55.06,5.87,47.27,15.04,curated
+DJI,Djibouti,Africa,11.8251,42.5903,19.8251,32.5903,3.8251,52.5903,centroid_derived
+DMA,Dominica,North America,15.415,-61.371,23.415,-71.371,7.415,-51.371,centroid_derived
+DNK,Denmark,Europe,56.2639,9.5018,57.75,8.08,54.56,15.15,curated
+DOM,Dominican Republic,North America,18.7357,-70.1627,26.7357,-80.1627,10.7357,-60.1627,centroid_derived
+DZA,Algeria,Africa,28.0339,1.6596,37.09,-8.67,18.96,11.98,curated
+ECU,Ecuador,South America,-1.8312,-78.1834,1.88,-92.0,-5.01,-75.19,curated
+EGY,Egypt,Africa,26.8206,30.8025,31.67,24.7,21.72,36.89,curated
+ERI,Eritrea,Africa,15.1794,39.7823,23.1794,29.7823,7.1794,49.7823,centroid_derived
+ESP,Spain,Europe,40.4637,-3.7492,43.79,-9.3,35.94,4.33,curated
+EST,Estonia,Europe,58.5953,25.0136,66.5953,15.0136,50.5953,35.0136,centroid_derived
+ETH,Ethiopia,Africa,9.145,40.4897,14.89,33.0,3.4,47.98,curated
+FIN,Finland,Europe,61.9241,25.7482,70.09,19.09,59.81,31.58,curated
+FJI,Fiji,Oceania,-17.7134,178.065,-9.7134,168.065,-25.7134,-171.935,centroid_derived
+FRA,France,Europe,46.2276,2.2137,51.09,-5.14,41.34,9.56,curated
+GAB,Gabon,Africa,-0.8037,11.6094,7.1963,1.6094,-8.8037,21.6094,centroid_derived
+GBR,United Kingdom,Europe,55.3781,-3.436,60.85,-8.65,49.86,1.77,curated
+GEO,Georgia,Europe,42.3154,43.3569,50.3154,33.3569,34.3154,53.3569,centroid_derived
+GHA,Ghana,Africa,7.9465,-1.0232,11.17,-3.26,4.74,1.2,curated
+GIN,Guinea,Africa,9.9456,-9.6966,17.9456,-19.6966,1.9456,0.3034,centroid_derived
+GMB,Gambia,Africa,13.4432,-15.3101,21.4432,-25.3101,5.4432,-5.3101,centroid_derived
+GNB,Guinea-Bissau,Africa,11.8037,-15.1804,19.8037,-25.1804,3.8037,-5.1804,centroid_derived
+GNQ,Equatorial Guinea,Africa,1.6508,10.2679,9.6508,0.2679,-6.3492,20.2679,centroid_derived
+GRC,Greece,Europe,39.0742,21.8243,41.75,19.37,34.8,28.25,curated
+GRD,Grenada,North America,12.1165,-61.679,20.1165,-71.679,4.1165,-51.679,centroid_derived
+GTM,Guatemala,North America,15.7835,-90.2308,23.7835,-100.2308,7.7835,-80.2308,centroid_derived
+GUY,Guyana,South America,4.8604,-58.9302,12.8604,-68.9302,-3.1396,-48.9302,centroid_derived
+HKG,Hong Kong,Asia,22.3193,114.1694,30.3193,104.1694,14.3193,124.1694,centroid_derived
+HND,Honduras,North America,15.2,-86.2419,23.2,-96.2419,7.2,-76.2419,centroid_derived
+HRV,Croatia,Europe,45.1,15.2,53.1,5.2,37.1,25.2,centroid_derived
+HTI,Haiti,North America,18.9712,-72.2852,26.9712,-82.2852,10.9712,-62.2852,centroid_derived
+HUN,Hungary,Europe,47.1625,19.5033,48.59,16.11,45.74,22.9,curated
+IDN,Indonesia,Asia,-0.7893,113.9213,5.9,95.01,-10.94,141.02,curated
+IND,India,Asia,20.5937,78.9629,35.51,68.16,6.75,97.4,curated
+IRL,Ireland,Europe,53.1424,-7.6921,55.39,-10.66,51.42,-5.99,curated
+IRN,"Iran, Islamic Republic of",Asia,32.4279,53.688,39.78,44.03,25.06,63.32,curated
+IRQ,Iraq,Asia,33.2232,43.6793,37.38,38.79,29.06,48.57,curated
+ISL,Iceland,Europe,64.9631,-19.0208,72.9631,-29.0208,56.9631,-9.0208,centroid_derived
+ISR,Israel,Asia,31.0461,34.8516,33.34,34.27,29.45,35.9,curated
+ITA,Italy,Europe,41.8719,12.5674,47.09,6.63,35.49,18.52,curated
+JAM,Jamaica,North America,18.1096,-77.2975,26.1096,-87.2975,10.1096,-67.2975,centroid_derived
+JOR,Jordan,Asia,30.5852,36.2384,33.37,34.96,29.19,39.3,curated
+JPN,Japan,Asia,36.2048,138.2529,45.52,122.93,24.05,145.82,curated
+KAZ,Kazakhstan,Asia,48.0196,66.9237,56.0196,56.9237,40.0196,76.9237,centroid_derived
+KEN,Kenya,Africa,-0.0236,37.9062,5.02,33.91,-4.68,41.9,curated
+KGZ,Kyrgyzstan,Asia,41.2044,74.7661,49.2044,64.7661,33.2044,84.7661,centroid_derived
+KHM,Cambodia,Asia,12.5657,104.991,20.5657,94.991,4.5657,114.991,centroid_derived
+KIR,Kiribati,Oceania,-3.3704,-168.734,4.6296,-178.734,-11.3704,-158.734,centroid_derived
+KOR,"Korea, Republic of",Asia,35.9078,127.7669,38.61,124.35,33.11,131.87,curated
+KWT,Kuwait,Asia,29.3117,47.4818,30.1,46.55,28.52,48.43,curated
+LAO,Lao People's Democratic Republic,Asia,19.8563,102.4955,27.8563,92.4955,11.8563,112.4955,centroid_derived
+LBN,Lebanon,Asia,33.8547,35.8623,34.69,35.1,33.05,36.64,curated
+LBR,Liberia,Africa,6.4281,-9.4295,14.4281,-19.4295,-1.5719,0.5705,centroid_derived
+LBY,Libya,Africa,26.3351,17.2283,34.3351,7.2283,18.3351,27.2283,centroid_derived
+LIE,Liechtenstein,Europe,47.166,9.5554,55.166,-0.4446,39.166,19.5554,centroid_derived
+LKA,Sri Lanka,Asia,7.8731,80.7718,15.8731,70.7718,-0.1269,90.7718,centroid_derived
+LSO,Lesotho,Africa,-29.6099,28.2336,-21.6099,18.2336,-37.6099,38.2336,centroid_derived
+LTU,Lithuania,Europe,55.1694,23.8813,63.1694,13.8813,47.1694,33.8813,centroid_derived
+LUX,Luxembourg,Europe,49.8153,6.1296,57.8153,-3.8704,41.8153,16.1296,centroid_derived
+LVA,Latvia,Europe,56.8796,24.6032,64.8796,14.6032,48.8796,34.6032,centroid_derived
+MAC,Macao,Asia,22.1987,113.5439,30.1987,103.5439,14.1987,123.5439,centroid_derived
+MAR,Morocco,Africa,31.7917,-7.0926,35.92,-17.02,27.67,-0.99,curated
+MCO,Monaco,Europe,43.7384,7.4246,51.7384,-2.5754,35.7384,17.4246,centroid_derived
+MDA,"Moldova, Republic of",Europe,47.4116,28.3699,55.4116,18.3699,39.4116,38.3699,centroid_derived
+MDG,Madagascar,Africa,-18.7669,46.8691,-10.7669,36.8691,-26.7669,56.8691,centroid_derived
+MDV,Maldives,Asia,3.2028,73.2207,11.2028,63.2207,-4.7972,83.2207,centroid_derived
+MEX,Mexico,North America,23.6345,-102.5528,32.72,-118.36,14.53,-86.71,curated
+MKD,North Macedonia,Europe,41.6086,21.7453,49.6086,11.7453,33.6086,31.7453,centroid_derived
+MLI,Mali,Africa,17.5707,-3.9962,25.5707,-13.9962,9.5707,6.0038,centroid_derived
+MLT,Malta,Europe,35.9375,14.3754,43.9375,4.3754,27.9375,24.3754,centroid_derived
+MMR,Myanmar,Asia,21.9162,95.956,29.9162,85.956,13.9162,105.956,centroid_derived
+MNE,Montenegro,Europe,42.7087,19.3744,50.7087,9.3744,34.7087,29.3744,centroid_derived
+MNG,Mongolia,Asia,46.8625,103.8467,54.8625,93.8467,38.8625,113.8467,centroid_derived
+MOZ,Mozambique,Africa,-18.6657,35.5296,-10.6657,25.5296,-26.6657,45.5296,centroid_derived
+MRT,Mauritania,Africa,21.0079,-10.9408,29.0079,-20.9408,13.0079,-0.9408,centroid_derived
+MUS,Mauritius,Africa,-20.3484,57.5522,-12.3484,47.5522,-28.3484,67.5522,centroid_derived
+MWI,Malawi,Africa,-13.2543,34.3015,-5.2543,24.3015,-21.2543,44.3015,centroid_derived
+MYS,Malaysia,Asia,4.2105,101.9758,7.36,99.64,0.85,119.27,curated
+NAM,Namibia,Africa,-22.9576,18.4904,-14.9576,8.4904,-30.9576,28.4904,centroid_derived
+NER,Niger,Africa,17.6078,8.0817,25.6078,-1.9183,9.6078,18.0817,centroid_derived
+NGA,Nigeria,Africa,9.082,8.6753,13.89,2.67,4.27,14.68,curated
+NIC,Nicaragua,North America,12.8654,-85.2072,20.8654,-95.2072,4.8654,-75.2072,centroid_derived
+NLD,Netherlands,Europe,52.1326,5.2913,53.55,3.36,50.75,7.23,curated
+NOR,Norway,Europe,60.472,8.4689,71.18,4.64,57.98,31.06,curated
+NPL,Nepal,Asia,28.3949,84.124,36.3949,74.124,20.3949,94.124,centroid_derived
+NRU,Nauru,Oceania,-0.5228,166.9315,7.4772,156.9315,-8.5228,176.9315,centroid_derived
+NZL,New Zealand,Oceania,-40.9006,174.886,-34.39,165.87,-47.29,178.55,curated
+OMN,Oman,Asia,21.5126,55.9233,26.4,52.0,16.65,59.84,curated
+PAK,Pakistan,Asia,30.3753,69.3451,37.07,60.87,23.69,77.84,curated
+PAN,Panama,North America,8.538,-80.7821,16.538,-90.7821,0.538,-70.7821,centroid_derived
+PER,Peru,South America,-9.19,-75.0152,-0.01,-81.33,-18.35,-68.65,curated
+PHL,Philippines,Asia,12.8797,121.774,21.12,116.93,4.59,126.6,curated
+PLW,Palau,Oceania,7.515,134.5825,15.515,124.5825,-0.485,144.5825,centroid_derived
+PNG,Papua New Guinea,Oceania,-6.315,143.9555,1.685,133.9555,-14.315,153.9555,centroid_derived
+POL,Poland,Europe,51.9194,19.1451,54.84,14.12,49.0,24.15,curated
+PRK,"Korea, Democratic People's Republic of",Asia,40.3399,127.5101,48.3399,117.5101,32.3399,137.5101,centroid_derived
+PRT,Portugal,Europe,39.3999,-8.2245,42.15,-9.5,36.96,-6.19,curated
+PRY,Paraguay,South America,-23.4425,-58.4438,-19.29,-62.65,-27.61,-54.26,curated
+PSE,Palestine,Asia,31.9522,35.2332,39.9522,25.2332,23.9522,45.2332,centroid_derived
+QAT,Qatar,Asia,25.3548,51.1839,26.16,50.75,24.48,51.64,curated
+ROU,Romania,Europe,45.9432,24.9668,48.27,20.26,43.62,29.69,curated
+RUS,Russian Federation,Asia,61.524,105.3188,81.86,19.25,41.19,179.99,curated
+RWA,Rwanda,Africa,-1.9403,29.8739,6.0597,19.8739,-9.9403,39.8739,centroid_derived
+SAU,Saudi Arabia,Asia,23.8859,45.0792,32.16,34.49,16.35,55.67,curated
+SDN,Sudan,Africa,12.8628,30.2176,20.8628,20.2176,4.8628,40.2176,centroid_derived
+SEN,Senegal,Africa,14.4974,-14.4524,22.4974,-24.4524,6.4974,-4.4524,centroid_derived
+SGP,Singapore,Asia,1.3521,103.8198,1.47,103.61,1.13,104.07,curated
+SLB,Solomon Islands,Oceania,-9.6457,160.1562,-1.6457,150.1562,-17.6457,170.1562,centroid_derived
+SLE,Sierra Leone,Africa,8.4606,-11.7799,16.4606,-21.7799,0.4606,-1.7799,centroid_derived
+SLV,El Salvador,North America,13.7942,-88.8965,21.7942,-98.8965,5.7942,-78.8965,centroid_derived
+SMR,San Marino,Europe,43.9424,12.4578,51.9424,2.4578,35.9424,22.4578,centroid_derived
+SOM,Somalia,Africa,5.1521,46.1996,13.1521,36.1996,-2.8479,56.1996,centroid_derived
+SRB,Serbia,Europe,44.0165,21.0059,52.0165,11.0059,36.0165,31.0059,centroid_derived
+SSD,South Sudan,Africa,6.877,31.307,14.877,21.307,-1.123,41.307,centroid_derived
+STP,Sao Tome and Principe,Africa,0.1864,6.6131,8.1864,-3.3869,-7.8136,16.6131,centroid_derived
+SUR,Suriname,South America,3.9193,-56.0278,11.9193,-66.0278,-4.0807,-46.0278,centroid_derived
+SVK,Slovakia,Europe,48.669,19.699,49.61,16.84,47.73,22.56,curated
+SVN,Slovenia,Europe,46.1512,14.9955,54.1512,4.9955,38.1512,24.9955,centroid_derived
+SWE,Sweden,Europe,60.1282,18.6435,69.06,11.11,55.34,24.16,curated
+SWZ,Eswatini,Africa,-26.5225,31.4659,-18.5225,21.4659,-34.5225,41.4659,centroid_derived
+SYC,Seychelles,Africa,-4.6796,55.492,3.3204,45.492,-12.6796,65.492,centroid_derived
+SYR,Syrian Arab Republic,Asia,34.8021,38.9968,42.8021,28.9968,26.8021,48.9968,centroid_derived
+TCD,Chad,Africa,15.4542,18.7322,23.4542,8.7322,7.4542,28.7322,centroid_derived
+TGO,Togo,Africa,8.6195,0.8248,16.6195,-9.1752,0.6195,10.8248,centroid_derived
+THA,Thailand,Asia,15.87,100.9925,20.46,97.34,5.61,105.64,curated
+TJK,Tajikistan,Asia,38.861,71.2761,46.861,61.2761,30.861,81.2761,centroid_derived
+TKM,Turkmenistan,Asia,38.9697,59.5563,46.9697,49.5563,30.9697,69.5563,centroid_derived
+TLS,Timor-Leste,Asia,-8.8742,125.7275,-0.8742,115.7275,-16.8742,135.7275,centroid_derived
+TON,Tonga,Oceania,-21.179,-175.1982,-13.179,174.8018,-29.179,-165.1982,centroid_derived
+TTO,Trinidad and Tobago,North America,10.6918,-61.2225,18.6918,-71.2225,2.6918,-51.2225,centroid_derived
+TUN,Tunisia,Africa,33.8869,9.5375,41.8869,-0.4625,25.8869,19.5375,centroid_derived
+TUR,Türkiye,Asia,38.9637,35.2433,42.11,25.67,35.81,44.83,curated
+TUV,Tuvalu,Oceania,-7.1095,177.6493,0.8905,167.6493,-15.1095,-172.3507,centroid_derived
+TWN,Taiwan,Asia,23.6978,120.9605,31.6978,110.9605,15.6978,130.9605,centroid_derived
+TZA,"Tanzania, United Republic of",Africa,-6.369,34.8888,-0.99,29.33,-11.75,40.45,curated
+UGA,Uganda,Africa,1.3733,32.2903,9.3733,22.2903,-6.6267,42.2903,centroid_derived
+UKR,Ukraine,Europe,48.3794,31.1656,52.37,22.14,44.39,40.23,curated
+URY,Uruguay,South America,-32.5228,-55.7658,-30.09,-58.49,-34.98,-53.08,curated
+USA,United States,North America,37.0902,-95.7129,49.38,-124.77,24.4,-66.95,curated
+UZB,Uzbekistan,Asia,41.3775,64.5853,49.3775,54.5853,33.3775,74.5853,centroid_derived
+VAT,Holy See (Vatican City State),Europe,41.9029,12.4534,49.9029,2.4534,33.9029,22.4534,centroid_derived
+VEN,"Venezuela, Bolivarian Republic of",South America,6.4238,-66.5897,12.2,-73.35,0.65,-59.8,curated
+VNM,Viet Nam,Asia,14.0583,108.2772,23.39,102.14,8.18,109.46,curated
+VUT,Vanuatu,Oceania,-15.3767,166.9592,-7.3767,156.9592,-23.3767,176.9592,centroid_derived
+WSM,Samoa,Oceania,-13.759,-172.1046,-5.759,177.8954,-21.759,-162.1046,centroid_derived
+XKX,Kosovo,Europe,42.6026,20.903,50.6026,10.903,34.6026,30.903,centroid_derived
+YEM,Yemen,Asia,15.5527,48.5164,23.5527,38.5164,7.5527,58.5164,centroid_derived
+ZAF,South Africa,Africa,-30.5595,22.9375,-22.13,16.46,-34.83,32.89,curated
+ZMB,Zambia,Africa,-13.1339,27.8493,-5.1339,17.8493,-21.1339,37.8493,centroid_derived
+ZWE,Zimbabwe,Africa,-19.0154,29.1549,-11.0154,19.1549,-27.0154,39.1549,centroid_derived

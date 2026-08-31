@@ -1,0 +1,9 @@
+# Ember monthly electricity data geographies (ISO-3).
+# APPROXIMATE default list (~88 geographies); Ember annual coverage is global (~215).
+# Reconcile against the Ember Open Data Catalogue before relying on it.
+iso3
+AUT,BEL,BGR,HRV,CYP,CZE,DNK,EST,FIN,FRA,DEU,GRC,HUN,IRL,ITA,LVA,LTU,LUX,MLT,NLD,POL,PRT,ROU,SVK,SVN,ESP,SWE,GBR,NOR,CHE,ISL,ALB,BIH,MNE,MKD,SRB,XKX,TUR,UKR,MDA
+USA,CAN,MEX,BRA,ARG,CHL,COL,PER,URY,VEN,ECU
+CHN,JPN,KOR,IND,IDN,MYS,PHL,THA,VNM,SGP,AUS,NZL,PAK,BGD,KAZ,TWN,HKG
+SAU,ARE,IRN,IRQ,ISR,JOR,KWT,OMN,QAT,LBN,EGY,DZA,MAR,TUN,LBY
+ZAF,NGA,KEN,ETH,GHA

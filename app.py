@@ -21,6 +21,7 @@ from country_utils import (
     get_preset_countries,
     normalize_country,
 )
+from availability_audit import render_audit_report, run_availability_audit
 from pipeline import (
     SOURCES,
     STATUS_BADGES,
@@ -28,7 +29,11 @@ from pipeline import (
     run_pipeline,
 )
 from source_mapping import load_source_area_mappings
-from source_registry import get_all_registered_sources
+from source_registry import (
+    ACQUISITION_MODES,
+    get_all_registered_sources,
+    get_source_capability_matrix,
+)
 
 load_dotenv()
 st.set_page_config(
@@ -134,6 +139,9 @@ with st.sidebar:
 
 tabs = st.tabs([
     "🚀 Acquisition & Status",
+    "🧭 Availability Audit",
+    "🔑 Credentials & Auth Check",
+    "🧩 Source Capability Matrix",
     "🗺️ Source Area Mappings",
     "🌐 Country Coverage Inventory",
     "📦 Feature Inventory (25 Vars)",
@@ -252,6 +260,27 @@ with tabs[0]:
             hide_index=True,
         )
         st.info(f"📁 Raw source-native datasets are stored unmutated under `{st.session_state.output_root}/raw`")
+
+        # Actionable per-item diagnosis — never a vague "request failed".
+        _ACTION_HINTS = {
+            "ACCESS_RESTRICTED": "Supply/rotate the credential (see 🔑 Credentials & Auth Check).",
+            "AUTH_FAILED": "Credential rejected — rotate the key/token.",
+            "MAPPING_MISSING": "Add the provider area code to config/source_area_mapping.csv.",
+            "SOURCE_NOT_COVERED": "Source does not publish this country — skip, not a failure.",
+            "NO_DATA_AVAILABLE": "HTTP 200 with zero records — no data for this combo, not a failure.",
+            "API_ERROR": "Endpoint returned an error/rate-limit — retry later.",
+            "DOWNLOAD_ERROR": "Network/download problem — retry (retry/backoff applied upstream).",
+            "INVALID_RESPONSE": "HTTP 200 but not real data (portal/HTML) — check endpoint config.",
+        }
+        problem_rows = df_res[df_res["status"] != "SUCCESS"]
+        if not problem_rows.empty:
+            with st.expander("🔍 Per-source diagnosis (non-success items)", expanded=True):
+                for _, row in problem_rows.iterrows():
+                    hint = _ACTION_HINTS.get(row["status"], "Review the detail message.")
+                    st.markdown(
+                        f"**{row['source']}** · {row['country_name']} · `{row['status']}`\n\n"
+                        f"{row['message']}\n\n→ **Action:** {hint}"
+                    )
     else:
         st.subheader("Source Plan for Current Mode")
         active_sources = [s for s in SOURCES if s.mode == mode]
@@ -269,9 +298,202 @@ with tabs[0]:
         st.info("👈 Choose candidate countries in the sidebar and press **Run Acquisition & Build Inventory**.")
 
 # ============================================================================
-# Tab 2: Source Area Mappings
+# Tab 2: Availability Audit
 # ============================================================================
 with tabs[1]:
+    st.subheader("🧭 HGT-QF Global Data Availability Audit")
+    st.markdown(
+        "Deterministic **country × feature × source × period** audit computed from the "
+        "registries — **no downloads and no API calls**. Three independent concepts: "
+        "**TARGET_READY** (electricity demand only), **FEATURE_COVERAGE** "
+        "(core / extended / optional), and **RESEARCH_READY** (target + configurable "
+        "core-coverage threshold). Optional features — prices, EV, AC/heat-pump, "
+        "sectoral demand, holidays — never disqualify a country."
+    )
+
+    def _parse_audit_countries() -> list[str]:
+        codes: list[str] = []
+        for line in country_text.replace(",", "\n").splitlines():
+            line_clean = line.strip()
+            if line_clean:
+                iso3 = normalize_country(line_clean)
+                if iso3 and iso3 not in codes:
+                    codes.append(iso3)
+        return codes
+
+    audit_countries = _parse_audit_countries()
+    if not audit_countries:
+        from country_registry import get_all_countries
+        audit_countries = [r.iso3 for r in get_all_countries()]
+
+    from research_config import build_research_config
+
+    col_a, col_b = st.columns([1, 1])
+    with col_a:
+        max_per_region = st.number_input("Max countries per region", min_value=1, max_value=50, value=6)
+    with col_b:
+        min_demand_history = st.number_input(
+            "Min consecutive demand months (TARGET rule)",
+            min_value=12, max_value=600, value=120, step=12,
+        )
+    col_c, col_d = st.columns([1, 1])
+    with col_c:
+        min_core_coverage = st.slider("Min core feature coverage", 0.0, 1.0, 0.8, 0.05,
+                                      format="%.0f%%")
+    with col_d:
+        require_optional = st.checkbox("Require ALL optional features", value=False)
+    run_audit_btn = st.button("🧭 Run Availability Audit", type="primary", use_container_width=True)
+
+    st.caption(
+        f"Auditing {len(audit_countries)} countries ({int(start_year)}–{int(end_year)}). "
+        "Discovery-only: no downloads, no API calls. "
+        "🔑 AUTH_REQUIRED = data exists but a credential is missing."
+    )
+
+    if run_audit_btn:
+        config = build_research_config(
+            min_history_months=int(min_demand_history),
+            min_consecutive_months=int(min_demand_history),
+            min_core_coverage=float(min_core_coverage),
+            require_optional_features=require_optional,
+        )
+        with st.spinner("Running deterministic coverage + readiness audit…"):
+            audit = run_availability_audit(
+                countries=audit_countries,
+                start_year=int(start_year),
+                end_year=int(end_year),
+                output_dir=str(Path.cwd() / "hgt_qf_audit"),
+                max_per_region=int(max_per_region),
+                config=config,
+            )
+        st.session_state.audit_report = render_audit_report(audit)
+        st.session_state.audit_result = audit
+        st.download_button(
+            "📥 Download audit JSON",
+            data=json.dumps(audit, indent=2, default=str),
+            file_name="availability_audit.json",
+            mime="application/json",
+        )
+
+    if st.session_state.get("audit_report"):
+        st.code(st.session_state.audit_report, language=None)
+        report_c = Path.cwd() / "hgt_qf_audit" / "metadata" / "report_C_readiness.csv"
+        report_a = Path.cwd() / "hgt_qf_audit" / "metadata" / "report_A_source_coverage.csv"
+        if report_c.exists():
+            with st.expander("📊 REPORT C — three-tier readiness (TARGET / FEATURE / RESEARCH)", expanded=False):
+                st.dataframe(pd.read_csv(report_c), use_container_width=True, hide_index=True)
+        if report_a.exists():
+            with st.expander("📊 REPORT A — source coverage + provenance registry (country × feature)", expanded=False):
+                st.dataframe(pd.read_csv(report_a), use_container_width=True, hide_index=True)
+
+# ============================================================================
+# Tab 3: Credentials & Auth Check
+# ============================================================================
+with tabs[2]:
+    st.subheader("🔑 Credential Propagation & Source Auth Check")
+    st.markdown(
+        "Tests each credential-protected source with a **tiny** request **before** any "
+        "25-year download. Credentials flow: **sidebar input → credential manager → "
+        "connector → API**. Real keys are never displayed, logged, or written to reports."
+    )
+
+    from credential_manager import load_credentials as _load_creds, masked as _masked, is_supplied as _supplied
+    from auth_check import run_auth_checks as _run_auth_checks
+
+    norm_creds = _load_creds(entered_credentials)
+
+    col_btn, col_note = st.columns([1, 2])
+    with col_btn:
+        run_auth_btn = st.button("🔑 Run Auth Check", type="primary", use_container_width=True)
+    with col_note:
+        st.caption(
+            "In this sandbox outbound network is blocked, so live probes will report "
+            "ENDPOINT_UNAVAILABLE / NETWORK_ERROR. Locally they perform the real "
+            "Ember / ENTSO-E / EIA probes and the CDS client check."
+        )
+
+    # Per-source credential status (masked).
+    with st.expander("Credential status (masked)", expanded=True):
+        rows = []
+        for src_id in ("ember", "entsoe", "eia", "era5"):
+            from credential_manager import format_ok as _fmt_ok
+            ok, note = _fmt_ok(src_id, norm_creds)
+            rows.append({
+                "Source": src_id.upper(),
+                "Supplied": "✓" if _supplied(src_id, norm_creds) else "—",
+                "Format": "VALID" if ok else ("INVALID" if _supplied(src_id, norm_creds) else "—"),
+                "Note": note,
+                "Masked": _masked(src_id, norm_creds) or "—",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    if run_auth_btn:
+        with st.spinner("Running tiny per-source auth probes…"):
+            auth_results = _run_auth_checks(norm_creds)
+        st.session_state.auth_check_results = auth_results
+    else:
+        auth_results = st.session_state.get("auth_check_results")
+
+    if auth_results:
+        for r in auth_results:
+            icon = "✅" if r.endpoint_available else ("🔑" if r.status in ("AUTH_FAILED", "CONFIGURATION_ERROR") else "⚠️")
+            with st.container(border=True):
+                st.markdown(f"**{icon} {r.source_name}**  (`{r.source_id}`)")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Credential supplied", "YES" if r.credential_supplied else "NO")
+                c2.metric("Credential format", "VALID" if r.credential_format_ok else "INVALID")
+                c3.metric("API response", f"HTTP {r.http_status}" if r.http_status is not None else "—")
+                c4.metric("Result", r.status)
+                if r.endpoint_available:
+                    st.success(f"Endpoint available — {r.message}")
+                elif r.status in ("AUTH_FAILED", "CONFIGURATION_ERROR"):
+                    st.error(f"{r.message} — Action: fix credential propagation (supply/rotate the key).")
+                else:
+                    st.warning(r.message)
+                st.caption(f"Masked key: {r.masked_credential or '(none)'}")
+
+# ============================================================================
+# Tab 4: Source Capability Matrix
+# ============================================================================
+with tabs[3]:
+    st.subheader("🧩 Source Capability Matrix")
+    st.markdown(
+        "How each source is **supposed** to be acquired — mode, role, coverage, auth, "
+        "resolution, and expected response. Three acquisition modes: "
+        "**API/country query**, **bulk/targeted job**, and **restricted**."
+    )
+    df_matrix = pd.DataFrame(get_source_capability_matrix())
+    st.dataframe(
+        df_matrix[[
+            "source", "role", "acquisition_mode", "country_coverage",
+            "temporal_resolution", "authentication", "historical_coverage",
+            "rate_limit", "expected_response",
+        ]].rename(columns={
+            "source": "Source",
+            "role": "Role",
+            "acquisition_mode": "Acquisition Mode",
+            "country_coverage": "Coverage",
+            "temporal_resolution": "Temporal",
+            "authentication": "Auth",
+            "historical_coverage": "History",
+            "rate_limit": "Rate Limit",
+            "expected_response": "Expected Response",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.markdown("**Acquisition modes:**")
+    for mode, label in ACQUISITION_MODES.items():
+        st.markdown(f"- `{mode}` — {label}")
+    st.info(
+        "CMIP6 is registered as `future_scenario` only — it is **never** part of the "
+        "historical 2000–2024 pipeline (NASA POWER primary → ERA5 fallback)."
+    )
+
+# ============================================================================
+# Tab 5: Source Area Mappings
+# ============================================================================
+with tabs[4]:
     st.subheader("🗺️ Verified Source-Specific Geographic Area Mappings")
     st.markdown("Maps canonical ISO-3 country codes to provider-specific identifiers (ENTSO-E EIC codes, EIA balancing authorities, AEMO region codes).")
 
@@ -302,9 +524,9 @@ with tabs[1]:
         st.warning("No mappings found in config/source_area_mapping.csv.")
 
 # ============================================================================
-# Tab 3: Country Coverage Inventory
+# Tab 6: Country Coverage Inventory
 # ============================================================================
-with tabs[2]:
+with tabs[5]:
     st.subheader("🌐 Country-Level Research Data Inventory")
     st.markdown("Availability matrix mapping candidate countries against HGT-QF feature domains.")
 
@@ -351,9 +573,9 @@ with tabs[2]:
         st.info("Country coverage inventory will be generated automatically after acquisition.")
 
 # ============================================================================
-# Tab 4: Feature Inventory (25 Variables)
+# Tab 7: Feature Inventory (25 Variables)
 # ============================================================================
-with tabs[3]:
+with tabs[6]:
     st.subheader("📦 HGT-QF 25-Feature Research Input Space Inventory")
     st.markdown("Authoritative specifications for all 25 conceptual variables defined in the HGT-QF research design.")
 
@@ -389,9 +611,9 @@ with tabs[3]:
     )
 
 # ============================================================================
-# Tab 5: Historical Coverage & L=120 Feasibility
+# Tab 8: Historical Coverage & L=120 Feasibility
 # ============================================================================
-with tabs[4]:
+with tabs[7]:
     st.subheader("⏳ Historical Coverage Depth & Lookback Feasibility ($L=120, H=12,36,60$)")
     st.markdown("Evaluates historical time horizons of electricity demand data to determine candidate suitability for sequence modeling.")
 
@@ -439,9 +661,9 @@ with tabs[4]:
         st.info("Historical coverage analysis will appear here after electricity demand acquisition.")
 
 # ============================================================================
-# Tab 6: Dataset Manifests & Hashes
+# Tab 9: Dataset Manifests & Hashes
 # ============================================================================
-with tabs[5]:
+with tabs[8]:
     st.subheader("📜 Dataset Manifest & SHA-256 Cryptographic Audit")
     st.markdown("Reproducibility manifest recording SHA-256 hashes, file locations, request parameters, and sentinel detection.")
 
@@ -488,9 +710,9 @@ with tabs[5]:
         st.info("Dataset manifest will be compiled upon acquisition.")
 
 # ============================================================================
-# Tab 7: Source Registry & Licenses
+# Tab 10: Source Registry & Licenses
 # ============================================================================
-with tabs[6]:
+with tabs[9]:
     st.subheader("📚 Verified Source Registry, Documentation & Licensing Terms")
 
     sources_list = get_all_registered_sources()
