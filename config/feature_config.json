@@ -1,6 +1,16 @@
 {
   "_meta": {
-    "note": "HGT-QF feature configuration. `role` is one of TARGET | CORE_EXOGENOUS | OPTIONAL_EXOGENOUS. `sources` is the FEATURE-SPECIFIC ordered priority list (first = preferred). `country_overrides` re-orders sources for specific countries. `derived_from` marks features computed at extraction time from a parent feature (data extraction, not ML preprocessing)."
+    "note": "HGT-QF feature configuration. Sections map to tiers: targets (TARGET), core_exogenous (CORE), extended_exogenous (EXTENDED), optional_exogenous (OPTIONAL). Tier semantics are defined in config/research_config.json. `sources` is the FEATURE-SPECIFIC ordered priority list (first = preferred). `country_overrides` re-orders sources for specific countries. `derived_from` marks features computed at extraction time from a parent feature (data extraction, not ML preprocessing).",
+    "tier_definitions": {
+      "target": "electricity demand — the forecasting target; THE fundamental requirement",
+      "core": "core explanatory variables — counted toward the configurable RESEARCH_READY coverage threshold",
+      "extended": "valuable contextual variables — tracked but never required for a country to qualify",
+      "optional": "coverage-limited variables (prices, EV, AC/heat-pump, holidays) — never disqualify a country"
+    },
+    "total_features": 25,
+    "core_count": 14,
+    "extended_count": 5,
+    "optional_count": 5
   },
   "targets": [
     {
@@ -75,32 +85,8 @@
       "sources": ["world_bank"]
     },
     {
-      "concept": "inflation_cpi",
-      "name": "Inflation (Consumer Price Index)",
-      "domain": "economic",
-      "frequency": "annual",
-      "unit": "%",
-      "sources": ["world_bank"]
-    },
-    {
       "concept": "total_population",
       "name": "Total Population",
-      "domain": "demographic",
-      "frequency": "annual",
-      "unit": "count",
-      "sources": ["world_bank"]
-    },
-    {
-      "concept": "population_growth",
-      "name": "Population Growth Rate",
-      "domain": "demographic",
-      "frequency": "annual",
-      "unit": "%",
-      "sources": ["world_bank"]
-    },
-    {
-      "concept": "urban_population",
-      "name": "Urban Population",
       "domain": "demographic",
       "frequency": "annual",
       "unit": "count",
@@ -153,6 +139,32 @@
       "frequency": "annual",
       "unit": "%",
       "sources": ["world_bank"]
+    }
+  ],
+  "extended_exogenous": [
+    {
+      "concept": "inflation_cpi",
+      "name": "Inflation (Consumer Price Index)",
+      "domain": "economic",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "population_growth",
+      "name": "Population Growth Rate",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "%",
+      "sources": ["world_bank"]
+    },
+    {
+      "concept": "urban_population",
+      "name": "Urban Population",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "count",
+      "sources": ["world_bank"]
     },
     {
       "concept": "cooling_degree_days",
@@ -201,6 +213,23 @@
       "frequency": "annual",
       "unit": "GWh",
       "sources": ["eurostat", "iea", "eia"]
+    },
+    {
+      "concept": "ac_heat_pump_penetration",
+      "name": "AC / Heat-Pump Penetration",
+      "domain": "built_environment",
+      "frequency": "annual",
+      "unit": "share",
+      "sources": ["iea"],
+      "note": "No global open source identified (prior audit: 0/194). Restricted IEA datasets only — never a hard requirement."
+    },
+    {
+      "concept": "public_holidays",
+      "name": "Public Holidays Calendar",
+      "domain": "calendar",
+      "frequency": "annual",
+      "unit": "count",
+      "sources": ["nager"]
     }
   ]
 }

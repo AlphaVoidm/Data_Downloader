@@ -277,7 +277,11 @@ with tabs[1]:
     st.subheader("🧭 HGT-QF Global Data Availability Audit")
     st.markdown(
         "Deterministic **country × feature × source × period** audit computed from the "
-        "registries — **no downloads and no API calls**. Run this before bulk acquisition."
+        "registries — **no downloads and no API calls**. Three independent concepts: "
+        "**TARGET_READY** (electricity demand only), **FEATURE_COVERAGE** "
+        "(core / extended / optional), and **RESEARCH_READY** (target + configurable "
+        "core-coverage threshold). Optional features — prices, EV, AC/heat-pump, "
+        "sectoral demand, holidays — never disqualify a country."
     )
 
     def _parse_audit_countries() -> list[str]:
@@ -295,18 +299,37 @@ with tabs[1]:
         from country_registry import get_all_countries
         audit_countries = [r.iso3 for r in get_all_countries()]
 
-    col_a, col_b = st.columns([1, 2])
+    from research_config import build_research_config
+
+    col_a, col_b = st.columns([1, 1])
     with col_a:
         max_per_region = st.number_input("Max countries per region", min_value=1, max_value=50, value=6)
-        run_audit_btn = st.button("🧭 Run Availability Audit", type="primary", use_container_width=True)
     with col_b:
-        st.caption(
-            f"Auditing {len(audit_countries)} countries ({int(start_year)}–{int(end_year)}). "
-            "Discovery-only: no downloads, no API calls. "
-            "🔑 AUTH_REQUIRED = data exists but a credential is missing."
+        min_demand_history = st.number_input(
+            "Min consecutive demand months (TARGET rule)",
+            min_value=12, max_value=600, value=120, step=12,
         )
+    col_c, col_d = st.columns([1, 1])
+    with col_c:
+        min_core_coverage = st.slider("Min core feature coverage", 0.0, 1.0, 0.8, 0.05,
+                                      format="%.0f%%")
+    with col_d:
+        require_optional = st.checkbox("Require ALL optional features", value=False)
+    run_audit_btn = st.button("🧭 Run Availability Audit", type="primary", use_container_width=True)
+
+    st.caption(
+        f"Auditing {len(audit_countries)} countries ({int(start_year)}–{int(end_year)}). "
+        "Discovery-only: no downloads, no API calls. "
+        "🔑 AUTH_REQUIRED = data exists but a credential is missing."
+    )
 
     if run_audit_btn:
+        config = build_research_config(
+            min_history_months=int(min_demand_history),
+            min_consecutive_months=int(min_demand_history),
+            min_core_coverage=float(min_core_coverage),
+            require_optional_features=require_optional,
+        )
         with st.spinner("Running deterministic coverage + readiness audit…"):
             audit = run_availability_audit(
                 countries=audit_countries,
@@ -314,6 +337,7 @@ with tabs[1]:
                 end_year=int(end_year),
                 output_dir=str(Path.cwd() / "hgt_qf_audit"),
                 max_per_region=int(max_per_region),
+                config=config,
             )
         st.session_state.audit_report = render_audit_report(audit)
         st.session_state.audit_result = audit
@@ -329,10 +353,10 @@ with tabs[1]:
         report_c = Path.cwd() / "hgt_qf_audit" / "metadata" / "report_C_readiness.csv"
         report_a = Path.cwd() / "hgt_qf_audit" / "metadata" / "report_A_source_coverage.csv"
         if report_c.exists():
-            with st.expander("📊 REPORT C — HGT-QF country readiness", expanded=False):
+            with st.expander("📊 REPORT C — three-tier readiness (TARGET / FEATURE / RESEARCH)", expanded=False):
                 st.dataframe(pd.read_csv(report_c), use_container_width=True, hide_index=True)
         if report_a.exists():
-            with st.expander("📊 REPORT A — source coverage (country × feature)", expanded=False):
+            with st.expander("📊 REPORT A — source coverage + provenance registry (country × feature)", expanded=False):
                 st.dataframe(pd.read_csv(report_a), use_container_width=True, hide_index=True)
 
 # ============================================================================

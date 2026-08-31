@@ -479,15 +479,24 @@ def classify_demand(
     start_year: int,
     end_year: int,
     credentials: dict[str, str] | None = None,
+    min_consecutive_months: int | None = None,
 ) -> dict[str, Any]:
     """Classify electricity-demand coverage for a country.
 
     MONTHLY_SUFFICIENT / MONTHLY_PARTIAL / ANNUAL_ONLY / UNAVAILABLE.
     Never treats annual-only data as monthly.
+
+    The returned dict also carries evidence-based continuity metrics
+    (first/last month, expected vs observed monthly observations, missing
+    months, longest continuous run, gap count). In discovery mode these are
+    derived from the source registry's historical range; after acquisition
+    they can be re-computed from the actual downloaded series.
     """
     target = get_target_feature()
     plan = resolve_feature(target.concept, country_iso3, start_year, end_year, credentials)
     min_history = target.min_history_months or 120
+    if min_consecutive_months is None:
+        min_consecutive_months = min_history
 
     monthly_capable = [
         d for d in plan.decisions
@@ -495,45 +504,78 @@ def classify_demand(
     ]
     any_capable = [d for d in plan.decisions if d.status in (SUPPORTED, AUTH_REQUIRED)]
 
+    def _evidence(best) -> dict[str, Any]:
+        overlap_months = best.period_overlap_months
+        first_month = f"{max(start_year, best.history_start)}-01"
+        last_month = f"{min(end_year, best.history_end)}-12"
+        return {
+            "iso3": country_iso3,
+            "best_monthly_source": best.source_name,
+            "resolution": best.frequency,
+            "first_month": first_month,
+            "last_month": last_month,
+            "expected_months": _months_between(start_year, end_year),
+            "observed_months": overlap_months,   # registry-implied; verified at acquisition
+            "missing_months": 0,                  # discovery assumes continuity
+            "longest_continuous_run": overlap_months,
+            "gap_count": 0,
+            "months_available": overlap_months,
+            "min_required_months": min_history,
+            "min_consecutive_months": min_consecutive_months,
+        }
+
     if monthly_capable:
         # plan.decisions is already in feature priority order -> first is preferred.
         best = monthly_capable[0]
         months = best.period_overlap_months
-        if months >= min_history:
-            return {
-                "iso3": country_iso3,
-                "status": MONTHLY_SUFFICIENT,
-                "badge": DEMAND_BADGES[MONTHLY_SUFFICIENT],
-                "best_monthly_source": best.source_name,
-                "months_available": months,
-                "min_required_months": min_history,
-            }
-        return {
-            "iso3": country_iso3,
-            "status": MONTHLY_PARTIAL,
-            "badge": DEMAND_BADGES[MONTHLY_PARTIAL],
-            "best_monthly_source": best.source_name,
-            "months_available": months,
-            "min_required_months": min_history,
-        }
+        evidence = _evidence(best)
+        if months >= min_history and months >= min_consecutive_months:
+            evidence["status"] = MONTHLY_SUFFICIENT
+            evidence["badge"] = DEMAND_BADGES[MONTHLY_SUFFICIENT]
+            return evidence
+        evidence["status"] = MONTHLY_PARTIAL
+        evidence["badge"] = DEMAND_BADGES[MONTHLY_PARTIAL]
+        return evidence
     if any_capable:
         best = any_capable[0]
+        # Annual-only: there is NO monthly series, so monthly continuity is zero.
+        overlap_months = best.period_overlap_months
         return {
             "iso3": country_iso3,
             "status": ANNUAL_ONLY,
             "badge": DEMAND_BADGES[ANNUAL_ONLY],
             "best_monthly_source": "",
+            "annual_source": best.source_name,
+            "resolution": best.frequency or "annual",
+            "first_month": "",
+            "last_month": "",
+            "expected_months": _months_between(start_year, end_year),
+            "observed_months": 0,
+            "missing_months": 0,
+            "longest_continuous_run": 0,
+            "gap_count": 0,
+            "annual_observations_expected": overlap_months // 12,
             "months_available": 0,
             "min_required_months": min_history,
-            "annual_source": best.source_name,
+            "min_consecutive_months": min_consecutive_months,
         }
     return {
         "iso3": country_iso3,
         "status": UNAVAILABLE,
         "badge": DEMAND_BADGES[UNAVAILABLE],
         "best_monthly_source": "",
+        "annual_source": "",
+        "resolution": "",
+        "first_month": "",
+        "last_month": "",
+        "expected_months": _months_between(start_year, end_year),
+        "observed_months": 0,
+        "missing_months": 0,
+        "longest_continuous_run": 0,
+        "gap_count": 0,
         "months_available": 0,
         "min_required_months": min_history,
+        "min_consecutive_months": min_consecutive_months,
     }
 
 

@@ -16,6 +16,7 @@ from typing import Any
 import pandas as pd
 
 from source_registry import get_source
+from status_vocabulary import source_status
 
 
 def _attempts_summary(r: Any) -> str:
@@ -24,7 +25,7 @@ def _attempts_summary(r: Any) -> str:
         return ""
     parts = []
     for a in r.attempts:
-        status = a.get("failure_reason") or a.get("verification") or "?"
+        status = a.get("source_status") or a.get("failure_reason") or a.get("verification") or "?"
         parts.append(f"{a.get('source', '?')}={status}")
     return " -> ".join(parts)
 
@@ -60,6 +61,7 @@ def build_report_b(results: list[Any]) -> pd.DataFrame:
             "units": r.unit,
             "records": r.records,
             "status": r.status,
+            "source_status": source_status(r.status),
             "verification_status": r.verification_status,
             "verification_notes": " | ".join(r.verification_notes),
             "attempts": _attempts_summary(r),

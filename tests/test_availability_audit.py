@@ -1,10 +1,11 @@
-"""Tests for the availability audit (Reports A & C)."""
+"""Tests for the availability audit (global availability + readiness reports)."""
 import json
 import tempfile
 import unittest
 from pathlib import Path
 
 from availability_audit import (
+    build_feature_summary,
     build_report_a,
     build_report_c,
     render_audit_report,
@@ -15,15 +16,28 @@ from availability_audit import (
 class AvailabilityAuditTest(unittest.TestCase):
     def test_report_c_columns(self):
         df = build_report_c(["EGY", "DEU", "USA", "KEN", "BWA"], 2000, 2024, {"EMBER_API_KEY": "x"})
-        for col in ("country", "iso3", "demand_status", "climate_status", "macro_status",
-                    "energy_status", "optional_feature_coverage", "core_readiness", "reason"):
+        for col in ("country", "iso3", "region", "target_status", "target_source",
+                    "first_month", "last_month", "expected_months", "observed_months",
+                    "missing_months", "longest_continuous_run", "gap_count",
+                    "core_coverage", "extended_coverage", "optional_coverage",
+                    "research_ready", "reason"):
             self.assertIn(col, df.columns)
 
     def test_report_a_columns(self):
         df = build_report_a(["EGY"], 2000, 2024, {"EMBER_API_KEY": "x"})
-        for col in ("country", "feature", "candidate_sources", "best_source", "frequency",
-                    "historical_start", "status", "access_type"):
+        for col in ("country", "feature", "tier", "candidate_sources",
+                    "candidate_source_statuses", "best_source", "availability_status",
+                    "frequency", "license", "authentication_required",
+                    "retrieval_method", "verification_url"):
             self.assertIn(col, df.columns)
+        # per-source SOURCE_* statuses are recorded for the fallback chain
+        self.assertTrue(df["candidate_source_statuses"].str.contains("SOURCE_").all())
+
+    def test_feature_summary(self):
+        rows = build_feature_summary(["EGY", "DEU", "BWA"], 2000, 2024, {"EMBER_API_KEY": "x"})
+        concepts = {r["feature"] for r in rows}
+        self.assertIn("electricity_demand", concepts)
+        self.assertIn("ac_heat_pump_penetration", concepts)
 
     def test_audit_writes_outputs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -34,18 +48,22 @@ class AvailabilityAuditTest(unittest.TestCase):
             meta = Path(tmp) / "metadata"
             self.assertTrue((meta / "report_A_source_coverage.csv").exists())
             self.assertTrue((meta / "report_C_readiness.csv").exists())
+            self.assertTrue((meta / "report_feature_summary.csv").exists())
             self.assertTrue((meta / "availability_audit.json").exists())
             payload = json.loads((meta / "availability_audit.json").read_text())
             self.assertEqual(payload["countries_evaluated"], 3)
-            self.assertIn("MONTHLY_SUFFICIENT", payload["demand_summary"])
+            self.assertIn("MONTHLY_SUFFICIENT", payload["target_summary"])
+            self.assertIn("RESEARCH_READY", payload["research_summary"])
+            self.assertIn("research_config", payload)
 
     def test_render_contains_headers(self):
         audit = run_availability_audit(countries=["EGY"], start_year=2000, end_year=2024,
                                        credentials={"EMBER_API_KEY": "x"})
         text = render_audit_report(audit)
-        self.assertIn("HGT-QF GLOBAL DATA AVAILABILITY AUDIT", text)
+        self.assertIn("TARGET_READY", text)
+        self.assertIn("FEATURE_COVERAGE", text)
+        self.assertIn("RESEARCH_READY", text)
         self.assertIn("MONTHLY_SUFFICIENT", text)
-        self.assertIn("CORE_READY", text)
 
 
 if __name__ == "__main__":

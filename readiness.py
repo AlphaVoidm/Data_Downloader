@@ -1,38 +1,41 @@
-"""HGT-QF country readiness + geographic diversity (spec §15, §16).
+"""HGT-QF three-tier country readiness (spec).
 
-Readiness is NOT a raw feature count. It combines:
-    - demand status (MONTHLY_SUFFICIENT / MONTHLY_PARTIAL / ANNUAL_ONLY / UNAVAILABLE)
-    - core exogenous coverage (climate / macro / energy-system)
-    - optional feature coverage
+Three INDEPENDENT concepts, never collapsed into one flag:
 
-Classification:
-    CORE_READY       verified monthly demand + core groups satisfied
-    CORE_PARTIAL     mostly present but one group weak or insufficient history
-    CORE_NOT_READY   demand annual-only/unavailable or core gaps
+    TARGET_READY      electricity-demand availability ONLY
+                      (MONTHLY_SUFFICIENT / MONTHLY_PARTIAL / ANNUAL_ONLY / UNAVAILABLE)
+    FEATURE_COVERAGE  which explanatory/contextual features exist per country
+                      (core / extended / optional — independently counted)
+    RESEARCH_READY    TARGET_READY AND configurable minimum core-feature coverage
+                      (researcher sets thresholds; optional features never gate)
+
+A country is NEVER disqualified for missing optional/extended features such as
+electricity prices, EV stock, AC/heat-pump penetration, or sectoral demand.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import Any
 
 from coverage_engine import (
     ANNUAL_ONLY,
     MONTHLY_PARTIAL,
     MONTHLY_SUFFICIENT,
+    SUPPORTED,
     UNAVAILABLE,
     classify_demand,
     resolve_country,
-    SUPPORTED,
 )
 from feature_registry import (
+    TIER_CORE,
+    TIER_EXTENDED,
+    TIER_OPTIONAL,
     FeatureSpec,
     get_all_features,
-    get_optional_features,
 )
+from research_config import ResearchConfig, load_research_config
 
-CORE_READY = "CORE_READY"
-CORE_PARTIAL = "CORE_PARTIAL"
-CORE_NOT_READY = "CORE_NOT_READY"
+RESEARCH_READY = "RESEARCH_READY"
+RESEARCH_NOT_READY = "RESEARCH_NOT_READY"
 
 # Finer diversity regions (spec §16): Middle East, Southeast Asia and Latin
 # America are split out from the six continents for balanced selection.
@@ -60,24 +63,156 @@ def diversity_region(iso3: str, fallback: str) -> str:
     """Return the diversity region for a country (finer than the continent)."""
     return _GEO_REGION_OVERRIDES.get(iso3.strip().upper(), fallback)
 
-# Domain groups used for readiness.
-CLIMATE_CONCEPTS = {"temperature_2m", "solar_radiation", "wind_speed_10m", "precipitation"}
-MACRO_CONCEPTS = {"gdp", "gdp_growth", "gdp_per_capita", "inflation_cpi"}
-DEMO_CONCEPTS = {"total_population", "population_growth", "urban_population", "urbanisation_rate"}
-ENERGY_CONCEPTS = {"total_electricity_generation", "renewable_generation_share", "generation_mix", "electricity_access"}
-STRUCTURE_CONCEPTS = {"manufacturing_value_added"}
-DERIVED_CLIMATE = {"cooling_degree_days", "heating_degree_days"}
 
-
-def _group_coverage(plans: dict[str, Any], concepts: set[str]) -> tuple[int, int]:
+def _tier_coverage(plans: dict[str, Any], tier: str, features: list[FeatureSpec]) -> dict[str, Any]:
     total = 0
-    ok = 0
-    for c in concepts:
-        if c in plans:
-            total += 1
-            if plans[c].best_status == SUPPORTED:
-                ok += 1
-    return ok, total
+    available = 0
+    auth_required = 0
+    detail: dict[str, str] = {}
+    for f in features:
+        plan = plans.get(f.concept)
+        if plan is None:
+            continue
+        total += 1
+        if plan.best_status == SUPPORTED:
+            available += 1
+            detail[f.concept] = "AVAILABLE"
+        elif plan.best_status == "AUTH_REQUIRED":
+            auth_required += 1
+            detail[f.concept] = "AUTH_REQUIRED"
+        else:
+            detail[f.concept] = plan.best_status
+    return {
+        "total": total,
+        "available": available,
+        "auth_required": auth_required,
+        "missing": total - available,
+        "ratio": (available / total) if total else 0.0,
+        "label": f"{available}/{total}",
+        "detail": detail,
+    }
+
+
+def evaluate_target_readiness(
+    country_iso3: str,
+    start_year: int,
+    end_year: int,
+    credentials: dict[str, str] | None = None,
+    config: ResearchConfig | None = None,
+) -> dict[str, Any]:
+    """TARGET_READY — electricity-demand availability ONLY (with evidence)."""
+    cfg = config or load_research_config()
+    demand = classify_demand(
+        country_iso3, start_year, end_year, credentials,
+        min_consecutive_months=cfg.min_consecutive_months,
+    )
+    demand["target_ready"] = demand["status"] in (MONTHLY_SUFFICIENT, MONTHLY_PARTIAL)
+    return demand
+
+
+def evaluate_feature_coverage(
+    country_iso3: str,
+    start_year: int,
+    end_year: int,
+    credentials: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """FEATURE_COVERAGE — independent per-tier counts for a country."""
+    all_features = get_all_features()
+    plans = {p.concept: p for p in resolve_country(country_iso3, start_year, end_year, credentials)}
+    core = _tier_coverage(plans, TIER_CORE, [f for f in all_features if f.tier == TIER_CORE])
+    extended = _tier_coverage(plans, TIER_EXTENDED, [f for f in all_features if f.tier == TIER_EXTENDED])
+    optional = _tier_coverage(plans, TIER_OPTIONAL, [f for f in all_features if f.tier == TIER_OPTIONAL])
+    return {
+        "iso3": country_iso3,
+        "core": core,
+        "extended": extended,
+        "optional": optional,
+        "core_coverage": core["label"],
+        "extended_coverage": extended["label"],
+        "optional_coverage": optional["label"],
+    }
+
+
+def evaluate_research_readiness(
+    country_iso3: str,
+    start_year: int,
+    end_year: int,
+    credentials: dict[str, str] | None = None,
+    config: ResearchConfig | None = None,
+) -> dict[str, Any]:
+    """RESEARCH_READY — TARGET_READY AND minimum core feature coverage.
+
+    Configurable via ResearchConfig (min history, min consecutive months,
+    min core/extended coverage, optional-feature requirement). Optional and
+    extended features are reported but never disqualify a country.
+    """
+    cfg = config or load_research_config()
+    target = evaluate_target_readiness(country_iso3, start_year, end_year, credentials, cfg)
+    coverage = evaluate_feature_coverage(country_iso3, start_year, end_year, credentials)
+
+    status = target["status"]
+    core = coverage["core"]
+    extended = coverage["extended"]
+    optional = coverage["optional"]
+
+    reasons: list[str] = []
+    ready = True
+
+    if status not in (MONTHLY_SUFFICIENT, MONTHLY_PARTIAL):
+        ready = False
+        reasons.append(f"target demand is {status}")
+
+    if status == MONTHLY_PARTIAL:
+        # insufficient history: only research-ready if explicitly allowed
+        ready = False
+        reasons.append(
+            f"monthly demand history insufficient "
+            f"({target.get('longest_continuous_run', 0)} consecutive months "
+            f"< {cfg.min_consecutive_months})"
+        )
+
+    if core["ratio"] < cfg.min_core_coverage:
+        ready = False
+        reasons.append(
+            f"core coverage {core['label']} below required "
+            f"{cfg.min_core_coverage:.0%}"
+        )
+
+    if extended["ratio"] < cfg.min_extended_coverage:
+        ready = False
+        reasons.append(
+            f"extended coverage {extended['label']} below required "
+            f"{cfg.min_extended_coverage:.0%}"
+        )
+
+    if cfg.require_optional_features and optional["missing"] > 0:
+        ready = False
+        reasons.append(f"optional features required but {optional['missing']} missing")
+
+    return {
+        "iso3": country_iso3,
+        "target_status": status,
+        "target_source": target.get("best_monthly_source") or target.get("annual_source", ""),
+        "target_resolution": target.get("resolution", ""),
+        "first_month": target.get("first_month", ""),
+        "last_month": target.get("last_month", ""),
+        "expected_months": target.get("expected_months", 0),
+        "observed_months": target.get("observed_months", 0),
+        "missing_months": target.get("missing_months", 0),
+        "longest_continuous_run": target.get("longest_continuous_run", 0),
+        "gap_count": target.get("gap_count", 0),
+        "core_coverage": core["label"],
+        "core_ratio": round(core["ratio"], 4),
+        "extended_coverage": extended["label"],
+        "optional_coverage": optional["label"],
+        "research_ready": RESEARCH_READY if ready else RESEARCH_NOT_READY,
+        "reason": "; ".join(reasons) if reasons else (
+            "monthly demand + core feature coverage verified"
+        ),
+        "core_detail": core["detail"],
+        "extended_detail": extended["detail"],
+        "optional_detail": optional["detail"],
+    }
 
 
 def evaluate_readiness(
@@ -85,83 +220,10 @@ def evaluate_readiness(
     start_year: int,
     end_year: int,
     credentials: dict[str, str] | None = None,
+    config: ResearchConfig | None = None,
 ) -> dict[str, Any]:
-    plans = {p.concept: p for p in resolve_country(country_iso3, start_year, end_year, credentials)}
-    demand = classify_demand(country_iso3, start_year, end_year, credentials)
-
-    climate_ok, climate_total = _group_coverage(plans, CLIMATE_CONCEPTS)
-    macro_ok, macro_total = _group_coverage(plans, MACRO_CONCEPTS)
-    demo_ok, demo_total = _group_coverage(plans, DEMO_CONCEPTS)
-    energy_ok, energy_total = _group_coverage(plans, ENERGY_CONCEPTS)
-    structure_ok, structure_total = _group_coverage(plans, STRUCTURE_CONCEPTS)
-    cdd_ok, cdd_total = _group_coverage(plans, DERIVED_CLIMATE)
-
-    optional_plans = {f.concept: plans[f.concept] for f in get_optional_features() if f.concept in plans}
-    optional_total = len(optional_plans)
-    optional_ok = sum(1 for p in optional_plans.values() if p.best_status == SUPPORTED)
-
-    demand_status = demand["status"]
-    core_group_scores = {
-        "climate": (climate_ok, climate_total),
-        "macro": (macro_ok, macro_total),
-        "demographic": (demo_ok, demo_total),
-        "energy_system": (energy_ok, energy_total),
-        "economic_structure": (structure_ok, structure_total),
-        "derived_climate": (cdd_ok, cdd_total),
-    }
-
-    # Readiness logic.
-    if demand_status in (UNAVAILABLE, ANNUAL_ONLY):
-        readiness = CORE_NOT_READY
-        reason = f"Demand is {demand_status.lower().replace('_', ' ')}"
-    elif demand_status == MONTHLY_PARTIAL:
-        readiness = CORE_PARTIAL
-        reason = f"Monthly demand history insufficient ({demand.get('months_available', 0)} months)"
-    elif climate_ok < climate_total or macro_ok < macro_total:
-        readiness = CORE_PARTIAL
-        reason = f"Core exogenous gaps: climate {climate_ok}/{climate_total}, macro {macro_ok}/{macro_total}"
-    elif energy_ok < energy_total:
-        readiness = CORE_PARTIAL
-        reason = f"Core energy-system gaps: {energy_ok}/{energy_total}"
-    else:
-        readiness = CORE_READY
-        reason = "Monthly demand + core exogenous groups verified"
-
-    return {
-        "iso3": country_iso3,
-        "demand_status": demand_status,
-        "demand_source": demand.get("best_monthly_source") or demand.get("annual_source", ""),
-        "demand_months": demand.get("months_available", 0),
-        "climate_status": f"{climate_ok}/{climate_total}",
-        "macro_status": f"{macro_ok}/{macro_total}",
-        "demographic_status": f"{demo_ok}/{demo_total}",
-        "energy_status": f"{energy_ok}/{energy_total}",
-        "structure_status": f"{structure_ok}/{structure_total}",
-        "derived_climate_status": f"{cdd_ok}/{cdd_total}",
-        "optional_feature_coverage": f"{optional_ok}/{optional_total}",
-        "core_readiness": readiness,
-        "reason": reason,
-        "core_group_scores": core_group_scores,
-    }
-
-
-def classify_demand_status(demand: dict[str, Any]) -> str:
-    return demand["status"]
-
-
-@dataclass
-class ReadinessSummary:
-    core_ready: int = 0
-    core_partial: int = 0
-    core_not_ready: int = 0
-
-    def record(self, readiness: str) -> None:
-        if readiness == CORE_READY:
-            self.core_ready += 1
-        elif readiness == CORE_PARTIAL:
-            self.core_partial += 1
-        else:
-            self.core_not_ready += 1
+    """Combined three-tier readiness record for a country."""
+    return evaluate_research_readiness(country_iso3, start_year, end_year, credentials, config)
 
 
 def select_diverse_countries(
@@ -169,7 +231,7 @@ def select_diverse_countries(
     max_per_region: int = 6,
     region_priority: list[str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Select a geographically diverse CORE_READY/CORE_PARTIAL set (spec §16).
+    """Select a geographically diverse RESEARCH_READY set (spec §16).
 
     Prioritises diversity across regions while respecting actual verified
     monthly demand availability (never includes a country merely for diversity).
@@ -181,12 +243,11 @@ def select_diverse_countries(
                            "Latin America", "South America", "Asia",
                            "Southeast Asia", "Oceania"]
 
-    eligible = [r for r in readiness_rows if r["core_readiness"] in (CORE_READY, CORE_PARTIAL)
-                and r["demand_status"] in (MONTHLY_SUFFICIENT, MONTHLY_PARTIAL)]
+    eligible = [r for r in readiness_rows if r.get("research_ready") == RESEARCH_READY]
 
-    # Rank within region: CORE_READY first, then demand months desc.
+    # Rank: longest continuous demand run first, then core coverage.
     def rank_key(r: dict[str, Any]):
-        return (0 if r["core_readiness"] == CORE_READY else 1, -r.get("demand_months", 0))
+        return (-r.get("longest_continuous_run", 0), -r.get("core_ratio", 0))
 
     eligible.sort(key=rank_key)
 
@@ -204,6 +265,8 @@ def select_diverse_countries(
 
 
 __all__ = [
-    "evaluate_readiness", "select_diverse_countries", "ReadinessSummary",
-    "CORE_READY", "CORE_PARTIAL", "CORE_NOT_READY",
+    "evaluate_target_readiness", "evaluate_feature_coverage",
+    "evaluate_research_readiness", "evaluate_readiness",
+    "select_diverse_countries", "diversity_region",
+    "RESEARCH_READY", "RESEARCH_NOT_READY",
 ]

@@ -5,6 +5,7 @@ from country_registry import COUNTRY_REGISTRY, get_country_bbox, get_country_rec
 from feature_registry import (
     FEATURE_REGISTRY,
     get_core_features,
+    get_extended_features,
     get_optional_features,
     get_target_feature,
 )
@@ -37,16 +38,23 @@ class FeatureRegistryTest(unittest.TestCase):
         self.assertTrue(target.is_target)
 
     def test_core_count(self):
-        # 1 target + 19 core exogenous
-        self.assertEqual(len(get_core_features()), 20)
+        # 1 target + 14 core explanatory
+        self.assertEqual(len(get_core_features()), 15)
+
+    def test_extended_count(self):
+        self.assertEqual(len(get_extended_features()), 5)
 
     def test_optional_count(self):
-        self.assertEqual(len(get_optional_features()), 3)
+        self.assertEqual(len(get_optional_features()), 5)
 
-    def test_no_ac_feature(self):
+    def test_ac_and_holidays_are_optional(self):
         concepts = {f.concept for f in FEATURE_REGISTRY.values()}
-        self.assertNotIn("ac_heat_pump_adoption", concepts)
-        self.assertNotIn("public_holidays", concepts)
+        self.assertIn("ac_heat_pump_penetration", concepts)
+        self.assertIn("public_holidays", concepts)
+        self.assertEqual(get_target_feature().tier, "target")
+        ac = FEATURE_REGISTRY["ac_heat_pump_penetration"]
+        self.assertEqual(ac.tier, "optional")
+        self.assertEqual(FEATURE_REGISTRY["public_holidays"].tier, "optional")
 
     def test_demand_source_priority(self):
         demand = get_target_feature()

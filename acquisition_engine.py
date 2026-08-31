@@ -22,6 +22,7 @@ from connectors.base import (
     EndpointVerification,
     VERIFIED,
 )
+from status_vocabulary import source_status
 from country_registry import get_country_record
 from coverage_engine import (
     AUTH_REQUIRED,
@@ -153,6 +154,7 @@ def acquire_feature(
             "source": decision.source_name,
             "verification": verification.status,
             "verification_note": verification.message,
+            "source_status": source_status(verification.status),
         })
 
         if verification.status == VERIFIED:
@@ -170,11 +172,13 @@ def acquire_feature(
                 base.verification_status = VERIFIED
                 base.verification_notes = outcome.verification_notes
                 base.failure_reason = outcome.failure_reason
+                base.attempts[-1]["source_status"] = source_status(outcome.status)
                 return base
             # Verified endpoint but non-successful outcome (e.g. BULK_MANUAL,
             # NO_RECORDS, SCHEMA_MISMATCH) -> fall through to the next source.
             base.attempts[-1]["failure_reason"] = outcome.status
             base.attempts[-1]["verification"] = verification.status
+            base.attempts[-1]["source_status"] = source_status(outcome.status)
             base.attempts[-1]["note"] = outcome.message
             continue
 
@@ -182,6 +186,7 @@ def acquire_feature(
         mapped = _connector_failure_status(verification)
         base.attempts[-1]["failure_reason"] = mapped
         base.attempts[-1]["verification"] = verification.status
+        base.attempts[-1]["source_status"] = source_status(verification.status)
         base.attempts[-1]["note"] = verification.message
 
     # All supported sources failed verification/download. Report the

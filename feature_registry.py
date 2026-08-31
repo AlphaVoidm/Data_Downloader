@@ -1,11 +1,16 @@
-"""Feature configuration for HGT-QF (redesigned).
+"""Feature configuration for HGT-QF (redesigned, three-tier).
 
-Loads config/feature_config.json and exposes a role-based feature model:
+Loads config/feature_config.json and exposes a tiered feature model:
 
-    role: TARGET | CORE_EXOGENOUS | OPTIONAL_EXOGENOUS
+    tier: target | core | extended | optional
 
-The electricity_demand feature is the forecasting TARGET and is treated
-separately from explanatory features everywhere downstream.
+    target    electricity_demand — the forecasting TARGET (fundamental requirement)
+    core      core explanatory variables (counted toward RESEARCH_READY threshold)
+    extended  valuable contextual variables (tracked, never required)
+    optional  coverage-limited variables (prices, EV, AC/heat-pump, holidays)
+
+The role field is preserved for compatibility:
+    TARGET | CORE_EXOGENOUS | EXTENDED_EXOGENOUS | OPTIONAL_EXOGENOUS
 """
 from __future__ import annotations
 
@@ -18,7 +23,20 @@ FEATURE_CONFIG_JSON = CONFIG_DIR / "feature_config.json"
 
 ROLE_TARGET = "TARGET"
 ROLE_CORE_EXOGENOUS = "CORE_EXOGENOUS"
+ROLE_EXTENDED_EXOGENOUS = "EXTENDED_EXOGENOUS"
 ROLE_OPTIONAL_EXOGENOUS = "OPTIONAL_EXOGENOUS"
+
+TIER_TARGET = "target"
+TIER_CORE = "core"
+TIER_EXTENDED = "extended"
+TIER_OPTIONAL = "optional"
+
+_ROLE_TO_TIER = {
+    ROLE_TARGET: TIER_TARGET,
+    ROLE_CORE_EXOGENOUS: TIER_CORE,
+    ROLE_EXTENDED_EXOGENOUS: TIER_EXTENDED,
+    ROLE_OPTIONAL_EXOGENOUS: TIER_OPTIONAL,
+}
 
 
 @dataclass(frozen=True)
@@ -38,12 +56,20 @@ class FeatureSpec:
     demand_priority: bool = False
 
     @property
+    def tier(self) -> str:
+        return _ROLE_TO_TIER.get(self.role, TIER_OPTIONAL)
+
+    @property
     def is_target(self) -> bool:
         return self.role == ROLE_TARGET
 
     @property
     def is_core(self) -> bool:
         return self.role in (ROLE_TARGET, ROLE_CORE_EXOGENOUS)
+
+    @property
+    def is_extended(self) -> bool:
+        return self.role == ROLE_EXTENDED_EXOGENOUS
 
     @property
     def is_optional(self) -> bool:
@@ -98,6 +124,8 @@ def _load() -> dict[str, FeatureSpec]:
         _add(ROLE_TARGET, item)
     for item in cfg.get("core_exogenous", []):
         _add(ROLE_CORE_EXOGENOUS, item)
+    for item in cfg.get("extended_exogenous", []):
+        _add(ROLE_EXTENDED_EXOGENOUS, item)
     for item in cfg.get("optional_exogenous", []):
         _add(ROLE_OPTIONAL_EXOGENOUS, item)
     return registry
@@ -118,15 +146,24 @@ def get_target_feature() -> FeatureSpec:
 
 
 def get_core_features() -> list[FeatureSpec]:
+    """Target + core explanatory features."""
     return sorted(
-        [f for f in FEATURE_REGISTRY.values() if f.is_core],
+        [f for f in FEATURE_REGISTRY.values() if f.tier in (TIER_TARGET, TIER_CORE)],
         key=lambda f: f.concept,
     )
 
 
 def get_core_exogenous() -> list[FeatureSpec]:
+    """Core explanatory features only (excludes the target)."""
     return sorted(
         [f for f in FEATURE_REGISTRY.values() if f.role == ROLE_CORE_EXOGENOUS],
+        key=lambda f: f.concept,
+    )
+
+
+def get_extended_features() -> list[FeatureSpec]:
+    return sorted(
+        [f for f in FEATURE_REGISTRY.values() if f.role == ROLE_EXTENDED_EXOGENOUS],
         key=lambda f: f.concept,
     )
 
@@ -138,12 +175,22 @@ def get_optional_features() -> list[FeatureSpec]:
     )
 
 
+def get_features_by_tier(tier: str) -> list[FeatureSpec]:
+    return sorted(
+        [f for f in FEATURE_REGISTRY.values() if f.tier == tier],
+        key=lambda f: f.concept,
+    )
+
+
 def get_all_features() -> list[FeatureSpec]:
     return sorted(FEATURE_REGISTRY.values(), key=lambda f: f.concept)
 
 
 __all__ = [
     "FeatureSpec", "FEATURE_REGISTRY", "get_feature", "get_target_feature",
-    "get_core_features", "get_core_exogenous", "get_optional_features",
-    "get_all_features", "ROLE_TARGET", "ROLE_CORE_EXOGENOUS", "ROLE_OPTIONAL_EXOGENOUS",
+    "get_core_features", "get_core_exogenous", "get_extended_features",
+    "get_optional_features", "get_features_by_tier", "get_all_features",
+    "ROLE_TARGET", "ROLE_CORE_EXOGENOUS", "ROLE_EXTENDED_EXOGENOUS",
+    "ROLE_OPTIONAL_EXOGENOUS", "TIER_TARGET", "TIER_CORE", "TIER_EXTENDED",
+    "TIER_OPTIONAL",
 ]

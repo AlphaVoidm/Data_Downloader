@@ -68,6 +68,26 @@ def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--output", default="hgt_qf_data", help="Output root directory")
 
 
+def _add_research_args(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--min-demand-history", type=int, default=None,
+                        help="Minimum consecutive monthly demand months for RESEARCH_READY "
+                             "(default: research_config.json, 120)")
+    parser.add_argument("--min-core-coverage", type=float, default=None,
+                        help="Minimum core feature coverage ratio 0-1 (default: research_config.json, 0.8)")
+    parser.add_argument("--require-optional", action="store_true",
+                        help="Require ALL optional features for RESEARCH_READY (default: off)")
+
+
+def _research_config_from_args(args: argparse.Namespace):
+    from research_config import build_research_config
+    return build_research_config(
+        min_history_months=args.min_demand_history,
+        min_consecutive_months=args.min_demand_history,
+        min_core_coverage=args.min_core_coverage,
+        require_optional_features=True if args.require_optional else None,
+    )
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     from country_registry import get_all_countries
     from availability_audit import render_audit_report, run_availability_audit
@@ -76,6 +96,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
     audit = run_availability_audit(
         countries=countries, start_year=args.start, end_year=args.end,
         credentials=_credentials(), output_dir=args.output, max_per_region=args.max_per_region,
+        config=_research_config_from_args(args),
     )
     print(render_audit_report(audit))
     if args.output:
@@ -111,27 +132,26 @@ def cmd_run(args: argparse.Namespace) -> int:
     from acquisition_engine import run_acquisition
     from acquisition_report import generate_acquisition_report
 
+    cfg = _research_config_from_args(args)
     countries = _parse_countries(args.countries) or [r.iso3 for r in get_all_countries()]
     audit = run_availability_audit(
         countries=countries, start_year=args.start, end_year=args.end,
         credentials=_credentials(), output_dir=args.output, max_per_region=args.max_per_region,
+        config=cfg,
     )
     print(render_audit_report(audit))
 
-    report_c = build_report_c(countries, args.start, args.end, _credentials())
-    eligible = report_c[
-        (report_c["demand_status"] == "MONTHLY_SUFFICIENT") &
-        (report_c["core_readiness"].isin(("CORE_READY", "CORE_PARTIAL")))
-    ]["iso3"].tolist()
+    report_c = build_report_c(countries, args.start, args.end, _credentials(), cfg)
+    eligible = report_c[report_c["research_ready"] == "RESEARCH_READY"]["iso3"].tolist()
 
     if args.limit:
         eligible = eligible[: args.limit]
 
     if not eligible:
-        print("\nNo CORE_READY / MONTHLY_SUFFICIENT countries found; skipping acquisition.")
+        print("\nNo RESEARCH_READY countries found; skipping acquisition.")
         return 0
 
-    print(f"\nAcquiring {len(eligible)} eligible countries: {', '.join(eligible)}\n")
+    print(f"\nAcquiring {len(eligible)} RESEARCH_READY countries: {', '.join(eligible)}\n")
     results = run_acquisition(
         countries=eligible, start=args.start, end=args.end, out_dir=args.output,
         credentials=_credentials(), progress=lambda m: print(f"  … {m}", flush=True),
@@ -172,6 +192,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_audit = sub.add_parser("audit", help="Discovery-only coverage + readiness audit")
     _add_common_args(p_audit)
+    _add_research_args(p_audit)
     p_audit.add_argument("--max-per-region", type=int, default=6, help="Diverse-selection cap per region")
     p_audit.set_defaults(func=cmd_audit)
 
@@ -183,6 +204,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_run = sub.add_parser("run", help="audit -> acquire for eligible countries")
     _add_common_args(p_run)
+    _add_research_args(p_run)
     p_run.add_argument("--max-per-region", type=int, default=6)
     p_run.add_argument("--limit", type=int, default=None, help="Cap the number of countries acquired")
     p_run.set_defaults(func=cmd_run)
