@@ -55,17 +55,25 @@ def verify_nasa(country: str) -> EndpointVerification:
     return verification_from_result(result, "nasa_power", country, "climate")
 
 
+def _classify_nasa_error(exc: Exception) -> str:
+    text = str(exc).lower()
+    if any(k in text for k in ("timed out", "timeout", "readtimeout", "connecttimeout")):
+        return "TIMEOUT"
+    return "NETWORK_ERROR"
+
+
 def _fetch_daily(country: str, start_year: int, end_year: int) -> pd.DataFrame:
     rec = get_country_record(country)
     if rec is None:
         raise ValueError(f"No centroid for {country}")
     rows: list[dict[str, Any]] = []
-    for chunk_start in range(start_year, end_year + 1, 5):
-        chunk_end = min(chunk_start + 4, end_year)
+    # NASA POWER daily point requests are limited to ~366 days; fetch one
+    # calendar year at a time and concatenate.
+    for year in range(start_year, end_year + 1):
         params = {
             "parameters": PARAMS, "community": "RE",
             "longitude": rec.centroid_lon, "latitude": rec.centroid_lat,
-            "start": f"{chunk_start}0101", "end": f"{chunk_end}1231", "format": "JSON",
+            "start": f"{year}0101", "end": f"{year}1231", "format": "JSON",
         }
         resp = _HTTP.get(ENDPOINT, params=params, timeout=120)
         result = validate_response(resp, expected_format="json", min_records=0)
@@ -124,9 +132,10 @@ def acquire_nasa(country: str, feature: str, start_year: int, end_year: int, out
     try:
         daily = _fetch_daily(country, start_year, end_year)
     except Exception as exc:  # noqa: BLE001
+        status = _classify_nasa_error(exc)
         return AcquisitionOutcome(
             source_id="nasa_power", country=country, feature=feature,
-            status="DOWNLOAD_ERROR", message=str(exc)[:200], failure_reason="NETWORK_ERROR",
+            status=status, message=str(exc)[:200], failure_reason=status,
         )
     if daily.empty:
         return AcquisitionOutcome(

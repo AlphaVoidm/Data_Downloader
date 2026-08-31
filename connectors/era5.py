@@ -55,6 +55,18 @@ def _make_client(credentials: dict[str, str] | None):
     return cdsapi.Client()
 
 
+def _classify_cds_error(exc: Exception) -> tuple[str, str]:
+    """Map a cdsapi/requests exception onto the granular failure vocabulary."""
+    text = str(exc)
+    low = text.lower()
+    if any(k in low for k in ("401", "403", "authentication", "forbidden", "invalid api key",
+                               "the request you have submitted is not valid", "credentials")):
+        return AUTH_FAILED, "CDS authentication/authorization failed"
+    if any(k in low for k in ("timed out", "timeout", "connecttimeout", "readtimeout")):
+        return "TIMEOUT", "CDS request timed out"
+    return "NETWORK_ERROR", "CDS retrieval failed (network/connection error)"
+
+
 def _area_weights(lat: np.ndarray) -> np.ndarray:
     return np.cos(np.deg2rad(lat)).clip(min=0.0)
 
@@ -172,9 +184,10 @@ def acquire_era5(country: str, feature: str, start_year: int, end_year: int, cre
             provenance={"dataset": ERA5_DATASET, "area": [north, west, south, east]},
         )
     except Exception as exc:  # noqa: BLE001
+        status, reason = _classify_cds_error(exc)
         return AcquisitionOutcome(
-            source_id="era5", country=country, feature=feature, status="DOWNLOAD_ERROR",
-            message=f"CDS retrieval failed: {str(exc)[:200]}", failure_reason="NETWORK_ERROR",
+            source_id="era5", country=country, feature=feature, status=status,
+            message=f"{reason}: {str(exc)[:160]}", failure_reason=status,
         )
     finally:
         if tmp_file.exists():

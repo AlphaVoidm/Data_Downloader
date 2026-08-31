@@ -80,7 +80,7 @@ def _connector_failure_status(verification: EndpointVerification) -> str:
     if s == "RATE_LIMITED":
         return "RATE_LIMITED"
     if s in ("NETWORK_ERROR", "TIMEOUT"):
-        return "NOT_VERIFIED"  # transient; will fall back / retry
+        return s  # preserve granularity; fallback still proceeds
     if s == "MAPPING_REQUIRED":
         return "MAPPING_REQUIRED"
     if s == "NOT_SUPPORTED":
