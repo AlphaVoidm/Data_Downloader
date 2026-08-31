@@ -6,6 +6,8 @@ Subcommands
     plan       Dry-run source resolution (no downloads): selected source + fallbacks.
     auth-check Tiny per-source credential/endpoint auth test (never prints keys).
     matrix     Show the source capability matrix (mode / role / coverage / auth).
+    test-source Single-source diagnostic: resolved entity/bbox, request params
+                (key excluded), auth status, HTTP/API result, record count.
     acquire    Coverage-gated acquisition (endpoint verification + fallback).
     run        audit -> acquire for target-ready countries.
     countries  List registered countries.
@@ -309,6 +311,81 @@ def cmd_rebuild_country_registry(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_diagnostic(diag: dict[str, Any]) -> str:
+    """Render a `test-source` diagnostic dict (keys are never printed)."""
+    lines = ["", "SOURCE DIAGNOSTIC", "=" * 100]
+    label_map = [
+        ("source", "Source"),
+        ("country", "Country"),
+        ("feature", "Feature"),
+        ("dataset", "Resolved dataset"),
+        ("resolved_entity", "Resolved entity"),
+        ("bbox", "Geographic region (bbox [N,W,S,E])"),
+        ("bbox_source", "BBox source"),
+        ("experiment", "Experiment"),
+        ("model", "Model"),
+        ("variable", "Variable"),
+        ("cds_variable", "CDS variable"),
+        ("endpoint", "Endpoint"),
+        ("auth_supplied", "Credential supplied"),
+        ("deps_available", "Dependencies available"),
+        ("request_params", "Request parameters (key excluded)"),
+        ("http_status", "HTTP status"),
+        ("response_type", "Response content-type"),
+        ("response_schema", "Response schema"),
+        ("records", "Raw records returned"),
+        ("country_level_records", "Final country-level record count"),
+        ("output_path", "Output path"),
+        ("status", "Status"),
+        ("failure_reason", "Failure reason"),
+        ("first_record", "First record"),
+        ("last_record", "Last record"),
+        ("resolution", "Temporal resolution"),
+    ]
+    for key, label in label_map:
+        val = diag.get(key)
+        if val in (None, "", [], {}):
+            continue
+        if isinstance(val, (dict, list)):
+            import json
+            val = json.dumps(val, default=str, ensure_ascii=False)
+        lines.append(f"  {label:<36} {val}")
+    return "\n".join(lines) + "\n"
+
+
+def cmd_test_source(args: argparse.Namespace) -> int:
+    from country_utils import normalize_country
+
+    country = normalize_country(args.country)
+    if not country:
+        print(f"Unrecognized country: {args.country!r}", file=sys.stderr)
+        return 2
+    creds = _credentials()
+    source = (args.source or "").strip().lower()
+
+    if source in ("ember",):
+        from connectors.ember import diagnose_ember
+        feature = args.feature or "electricity_demand"
+        diag = diagnose_ember(country, feature, args.start, args.end,
+                              creds.get("EMBER_API_KEY"))
+    elif source in ("cds", "era5"):
+        from connectors.era5 import diagnose_era5
+        feature = args.feature or "temperature_2m"
+        diag = diagnose_era5(country, feature, args.start, args.end, creds, args.output)
+    elif source == "cmip6":
+        from connectors.cmip6 import diagnose_cmip6
+        diag = diagnose_cmip6(country, args.variable or "tas",
+                              args.experiment or "historical", args.model,
+                              args.start, args.end, creds)
+    else:
+        print(f"Unsupported source {args.source!r}. Supported: ember, cds/era5, cmip6.",
+              file=sys.stderr)
+        return 2
+
+    print(_render_diagnostic(diag))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="main.py", description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="command", required=True)
@@ -336,6 +413,18 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_matrix = sub.add_parser("matrix", help="Show the source capability matrix")
     p_matrix.set_defaults(func=cmd_matrix)
+
+    p_test = sub.add_parser("test-source", help="Single-source diagnostic (resolved entity/bbox, params, records)")
+    p_test.add_argument("source", help="Source to test: ember | cds (era5) | cmip6")
+    p_test.add_argument("--country", required=True, help="Country ISO-3 or name (e.g. EGY)")
+    p_test.add_argument("--feature", default=None, help="Feature concept (ember/cds), e.g. electricity_demand, temperature_2m")
+    p_test.add_argument("--variable", default=None, help="CMIP6 variable, e.g. tas / pr")
+    p_test.add_argument("--experiment", default=None, help="CMIP6 experiment, e.g. historical / ssp245 / ssp2_4_5")
+    p_test.add_argument("--model", default=None, help="CMIP6 model, e.g. mpi_esm1_2_hr")
+    p_test.add_argument("--start", type=int, default=2000, help="Start year (default 2000)")
+    p_test.add_argument("--end", type=int, default=2024, help="End year (default 2024)")
+    p_test.add_argument("--output", default="hgt_qf_data", help="Output root directory")
+    p_test.set_defaults(func=cmd_test_source)
 
     p_run = sub.add_parser("run", help="audit -> acquire for target-ready countries")
     _add_common_args(p_run)

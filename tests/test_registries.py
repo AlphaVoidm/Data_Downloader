@@ -120,8 +120,10 @@ class SourceRegistryTest(unittest.TestCase):
     def test_capability_matrix_classifies_modes_and_roles(self):
         from source_registry import get_source_capability_matrix, get_source
         matrix = {r["source_id"]: r for r in get_source_capability_matrix()}
-        self.assertEqual(matrix["ember"]["acquisition_mode"], "api_country_query")
-        self.assertEqual(matrix["era5"]["acquisition_mode"], "bulk_job")
+        self.assertEqual(matrix["ember"]["acquisition_mode"], "country_api")
+        self.assertEqual(matrix["era5"]["acquisition_mode"], "grid_spatial_subset")
+        self.assertEqual(matrix["nasa_power"]["acquisition_mode"], "point_api")
+        self.assertEqual(matrix["cmip6"]["acquisition_mode"], "grid_spatial_subset")
         self.assertEqual(matrix["iea"]["acquisition_mode"], "restricted")
         # CMIP6 is registered but explicitly future-scenario only.
         self.assertEqual(matrix["cmip6"]["role"], "future_scenario")

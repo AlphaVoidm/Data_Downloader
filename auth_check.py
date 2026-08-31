@@ -56,27 +56,28 @@ class AuthCheckResult:
 
 # --- Tiny per-source auth probes --------------------------------------------
 def _probe_ember(credentials: dict[str, str] | None) -> dict[str, Any]:
-    from connectors.ember import build_ember_url, _entity_candidates
+    from connectors.ember import _date_arg, BASE
     from connectors.base import _HTTP, ConnectorError
     key = credentials.get("EMBER_API_KEY") if credentials else None
     history: list[dict[str, Any]] = []
-    # Tiny probe: one entity, one month, monthly demand endpoint.
-    entity = _entity_candidates("DEU")[0]
-    url = build_ember_url("electricity-demand", "monthly", entity, "2024", "2024")
-    resp = _HTTP.get(url, params={"entity": entity, "start_date": "2024",
-                                  "end_date": "2024", "api_key": key}, timeout=30, history=history)
+    # Tiny probe: one entity code, one month, monthly demand endpoint.
+    url = f"{BASE}electricity-demand/monthly"
+    resp = _HTTP.get(url, params={"entity_code": "DEU", "start_date": _date_arg(2024, "monthly"),
+                                  "end_date": _date_arg(2024, "monthly", end=True),
+                                  "api_key": key}, timeout=30, history=history)
     if resp.status_code in (401, 403):
         return {"status": AUTH_FAILED, "message": f"HTTP {resp.status_code} — key rejected",
                 "http_status": resp.status_code, "attempts": history}
     if resp.status_code == 200:
         try:
             payload = resp.json()
-            ok = isinstance(payload, list)
+            rows = payload.get("data", []) if isinstance(payload, dict) else payload
+            ok = isinstance(rows, list)
         except Exception:  # noqa: BLE001
             ok = False
         if ok:
             return {"status": ENDPOINT_OK,
-                    "message": f"HTTP 200 — monthly demand endpoint available ({len(payload)} sample row(s))",
+                    "message": f"HTTP 200 — monthly demand endpoint available ({len(rows)} sample row(s))",
                     "http_status": 200, "endpoint_available": True, "attempts": history}
         return {"status": AUTH_FAILED, "message": "HTTP 200 but unexpected response shape",
                 "http_status": 200, "attempts": history}

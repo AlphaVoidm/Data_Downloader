@@ -236,6 +236,59 @@ def acquire_climate(
     return acquire_era5(iso3, primary, start, end, credentials, Path(out_dir))
 
 
+def diagnose_era5(
+    country: str, feature: str, start_year: int, end_year: int,
+    credentials: dict[str, str] | None, out_dir: Path | str = Path("hgt_qf_data"),
+) -> dict[str, Any]:
+    """Diagnostic for `test-source cds`: resolved bbox, request parameters
+    (key excluded), auth status, dependency status, and — when credentials are
+    present — a real chunked extraction with the final country-level record
+    count."""
+    bbox = bbox_from_iso3(country)
+    diag: dict[str, Any] = {
+        "source": "era5",
+        "country": country,
+        "dataset": ERA5_MONTHLY_DATASET,
+        "feature": feature,
+        "auth_supplied": cds_credentials_available(credentials),
+        "deps_available": _deps_available() is None,
+        "bbox": bbox.to_cds_area() if bbox else None,
+        "bbox_source": bbox.source if bbox else None,
+        "request_params": {},
+        "status": "",
+        "records": 0,
+        "output_path": "",
+        "failure_reason": "",
+    }
+    if bbox is None:
+        diag["failure_reason"] = f"MAPPING_REQUIRED: no bbox registered for {country}"
+        return diag
+    if not cds_credentials_available(credentials):
+        diag["failure_reason"] = "AUTH_FAILED: CDS credentials required"
+        diag["request_params"] = {
+            "product_type": "monthly_averaged_reanalysis",
+            "variable": [s["cds_name"] for s in ERA5_VARIABLES.values()],
+            "year": [str(y) for y in range(start_year, end_year + 1)],
+            "month": [f"{m:02d}" for m in range(1, 13)],
+            "time": "00:00",
+            "area": bbox.to_cds_area(),
+            "format": "netcdf",
+        }
+        return diag
+    missing = _deps_available()
+    if missing:
+        diag["failure_reason"] = f"DEPENDENCY_MISSING: {missing}"
+        return diag
+
+    outcome = acquire_era5(country, feature, start_year, end_year, credentials, Path(out_dir))
+    diag["status"] = outcome.status
+    diag["records"] = outcome.records
+    diag["output_path"] = outcome.path
+    if outcome.status != "SUCCESS":
+        diag["failure_reason"] = f"{outcome.failure_reason}: {outcome.message}"
+    return diag
+
+
 def era5_connector(country: str, feature: str, start: int, end: int, credentials: dict[str, str] | None, out_dir: Path, **_: Any):
     verification = verify_era5(country, credentials)
     if verification.status != "VERIFIED":
@@ -250,5 +303,6 @@ def era5_connector(country: str, feature: str, start: int, end: int, credentials
 
 __all__ = [
     "ERA5_VARIABLES", "ERA5_DATASET", "acquire_era5", "acquire_climate",
-    "verify_era5", "era5_connector", "_classify_cds_error", "_creds_available",
+    "verify_era5", "era5_connector", "diagnose_era5",
+    "_classify_cds_error", "_creds_available",
 ]

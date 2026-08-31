@@ -11,6 +11,7 @@ import pandas as pd
 from connectors import ember as ember_mod
 from connectors import era5 as era5_mod
 from connectors import nasa_power as nasa_mod
+from connectors.base import ConnectorError
 
 
 class _FakeResponse:
@@ -39,12 +40,40 @@ def _gen_rows(series_value_map, date="2024-01-01"):
 
 
 class EmberUrlTest(unittest.TestCase):
-    def test_demand_url(self):
-        url = ember_mod.build_ember_url("electricity-demand", "monthly", "EGY", "2000", "2024")
+    def test_demand_url_uses_entity_code_and_ym_dates(self):
+        url = ember_mod.build_ember_url("electricity-demand", "monthly", "EGY", 2000, 2024)
         self.assertIn("/electricity-demand/monthly", url)
-        self.assertIn("entity=EGY", url)
+        self.assertIn("entity_code=EGY", url)          # ISO code, NOT the name param
+        self.assertNotIn("entity=EGY", url)
+        self.assertIn("start_date=2000-01", url)       # monthly endpoints take YYYY-MM
+        self.assertIn("end_date=2024-12", url)
+
+    def test_yearly_url_uses_year_dates(self):
+        url = ember_mod.build_ember_url("electricity-generation", "yearly", "BRA", 2000, 2024)
+        self.assertIn("entity_code=BRA", url)
         self.assertIn("start_date=2000", url)
         self.assertIn("end_date=2024", url)
+
+    def test_resolve_entity_from_options(self):
+        options = {"data": [
+            {"entity_code": "AFG", "entity": "Afghanistan"},
+            {"entity_code": "EGY", "entity": "Egypt"},
+        ]}
+        with mock.patch("connectors.ember._HTTP.get",
+                        return_value=_FakeResponse(options)) as get:
+            entity = ember_mod.resolve_entity("EGY", "k", "electricity-demand", "monthly")
+        self.assertEqual(entity["entity_code"], "EGY")
+        self.assertEqual(entity["entity_name"], "Egypt")
+        self.assertEqual(entity["resolution_method"], "options")
+        # options endpoint queried with the entity_code filter first
+        self.assertIn("options/electricity-demand/monthly/entity_code", get.call_args.args[0])
+
+    def test_resolve_entity_falls_back_to_iso3(self):
+        with mock.patch("connectors.ember._HTTP.get",
+                        side_effect=ConnectorError("NETWORK_ERROR")) as get:
+            entity = ember_mod.resolve_entity("EGY", "k", "electricity-demand", "monthly")
+        self.assertEqual(entity["entity_code"], "EGY")
+        self.assertEqual(entity["resolution_method"], "iso3_fallback")
 
     def test_uses_api_key_query_param_not_bearer(self):
         with mock.patch("connectors.ember._HTTP.get", return_value=_FakeResponse(_gen_rows([("Demand", 12.0)]))) as get:

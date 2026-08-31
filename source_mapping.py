@@ -152,9 +152,17 @@ def validate_source_capability(iso3: str, source_name: str) -> tuple[str, str]:
         else:
             return "SOURCE_NOT_COVERED", f"ENTSO-E Transparency covers European electricity market areas only, not {iso3_clean}"
 
-    # 4. Research Tier Sources
-    if any(term in s_norm for term in ["era5", "cmip6", "iiasa", "gpwv4"]):
-        return "RESEARCH_TIER", f"{source_name} is a Research-Tier bulk raster/scenario dataset requiring batch extraction"
+    # 4. Global Gridded Datasets (ERA5 / CMIP6) — covered everywhere,
+    #    acquired via spatial-subset extraction (country bbox), never a
+    #    country-level file lookup.
+    if "era5" in s_norm or "cds" in s_norm:
+        return "OK", f"{source_name} is globally gridded; acquired via country bbox spatial-subset extraction"
+    if "cmip6" in s_norm:
+        return "OK", f"{source_name} is globally gridded; acquired via model/experiment + country bbox spatial-subset extraction"
+
+    # 5. Remaining research-tier datasets (IIASA SSP, GPWv4, ...) not yet wired
+    if any(term in s_norm for term in ["iiasa", "gpwv4"]):
+        return "RESEARCH_TIER", f"{source_name} is a Research-Tier bulk dataset requiring batch extraction"
 
     return "SOURCE_NOT_COVERED", f"No verified coverage mapping for {source_name} on {iso3_clean}"
 

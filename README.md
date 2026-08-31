@@ -54,20 +54,25 @@ config/
 └── owid_ev_countries.csv          # OWID EV country set (~63)
 ```
 
-### Acquisition modes (three-way source execution)
+### Acquisition modes (four-way source execution)
 
-Every source is classified into one of three acquisition modes in
-`source_registry.json` (exposed via `python main.py matrix`):
+Every source declares an acquisition mode in `source_registry.json` (exposed
+via `python main.py matrix`); the engine dispatches on it so gridded sources
+are never treated like per-country tabular APIs:
 
 | Mode | Examples | Behavior |
 |------|----------|----------|
-| `api_country_query` | Ember, World Bank, NASA POWER, Nager, ENTSO-E, EIA, NESO | Query the country directly |
-| `bulk_job` | ERA5/CDS, CMIP6, AEMO, OWID, IRENA | Submit a targeted job; download only the extracted result |
+| `country_api` | Ember, World Bank, Nager, ENTSO-E, EIA, NESO, Eurostat | Query the country directly |
+| `point_api` | NASA POWER | Point/grid query at the country centroid → daily → monthly |
+| `grid_spatial_subset` | ERA5/CDS, CMIP6 | Country bbox → CDS sub-region request → area-weighted monthly aggregate → compact file; temp raster deleted |
+| `bulk_dataset` | AEMO, OWID, IRENA | Bulk catalog download; extract target rows |
 | `restricted` | IEA | Report honestly; do not attempt |
 
-Historical climate is **NASA POWER (primary) → ERA5 (fallback)**. CMIP6 is
-registered as a `future_scenario` source only and is **never** used to backfill
-2000–2024 (no "missing temperature → download CMIP6").
+Historical climate is **NASA POWER (primary) → ERA5 (fallback)**. ERA5 and
+CMIP6 are *globally gridded* — a country is never "not covered"; acquisition is
+a spatial subset. CMIP6 (model + experiment + variable + bbox) is used for
+**future/scenario** runs (e.g. `historical tas 2000-2014`, `ssp245 tas
+2015-2100`) and is never used to backfill the 2000–2024 historical pipeline.
 
 ### Feature model (locked hierarchy, 25 features)
 
@@ -177,11 +182,16 @@ python main.py auth-check
 # 4) CAPABILITY MATRIX — how each source is supposed to be acquired
 python main.py matrix
 
-# 5) ACQUISITION — only after plan + auth-check are validated.
+# 5) SINGLE-SOURCE DIAGNOSTIC — resolved entity/bbox + request params + records
+python main.py test-source ember --country EGY --feature electricity_demand --start 2000 --end 2024
+python main.py test-source cds   --country EGY --feature temperature_2m      --start 2000 --end 2001
+python main.py test-source cmip6 --country EGY --variable tas --experiment ssp245 --start 2015 --end 2100
+
+# 6) ACQUISITION — only after plan + auth-check are validated.
 python main.py acquire --countries EGY DEU GBR --features electricity_demand temperature_2m \
     --start 2000 --end 2024 --output hgt_qf_data
 
-# 6) audit -> acquire for TARGET_READY countries (--research-ready to tighten)
+# 7) audit -> acquire for TARGET_READY countries (--research-ready to tighten)
 python main.py run --start 2000 --end 2024 --output hgt_qf_data --min-core-coverage 0.8
 
 # Introspection

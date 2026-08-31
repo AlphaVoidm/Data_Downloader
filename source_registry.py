@@ -50,7 +50,7 @@ class SourceDefinition:
     api_available: bool
     notes: str = ""
     aliases: tuple[str, ...] = field(default_factory=tuple)
-    acquisition_mode: str = "api_country_query"
+    acquisition_mode: str = "country_api"
     role: str = "primary"
 
     # Legacy-compatible accessors (used by pipeline.py / provenance.py)
@@ -119,7 +119,7 @@ def load_source_registry() -> dict[str, SourceDefinition]:
             academic_relevance=item.get("academic_relevance", ""),
             public_access=item.get("public_access", ""),
             api_available=bool(item.get("api_available", False)),
-            acquisition_mode=item.get("acquisition_mode", "api_country_query"),
+            acquisition_mode=item.get("acquisition_mode", "country_api"),
             role=item.get("role", "primary"),
             notes=item.get("notes", ""),
             aliases=tuple(item.get("aliases", [])),
@@ -176,14 +176,24 @@ def get_all_registered_sources() -> list[SourceDefinition]:
     return list(SOURCE_REGISTRY.values())
 
 
-# --- Acquisition modes (the three-way source execution model) -----------------
-MODE_API_COUNTRY_QUERY = "api_country_query"
-MODE_BULK_JOB = "bulk_job"
+# --- Acquisition modes (the four-way source execution model) -----------------
+# The engine dispatches on these so gridded sources (ERA5/CMIP6) are never
+# treated like per-country tabular APIs and vice versa.
+MODE_COUNTRY_API = "country_api"
+MODE_BULK_DATASET = "bulk_dataset"
+MODE_GRID_SPATIAL_SUBSET = "grid_spatial_subset"
+MODE_POINT_API = "point_api"
 MODE_RESTRICTED = "restricted"
 
+# Legacy aliases (kept so older callers/tests keep working).
+MODE_API_COUNTRY_QUERY = MODE_COUNTRY_API
+MODE_BULK_JOB = MODE_BULK_DATASET
+
 ACQUISITION_MODES: dict[str, str] = {
-    MODE_API_COUNTRY_QUERY: "Query country directly",
-    MODE_BULK_JOB: "Submit targeted job/request; download only the extracted result",
+    MODE_COUNTRY_API: "Query country directly (per-country API)",
+    MODE_POINT_API: "Point/grid query at country centroid (NASA POWER)",
+    MODE_GRID_SPATIAL_SUBSET: "Gridded: spatial-subset + aggregate to country (ERA5/CMIP6)",
+    MODE_BULK_DATASET: "Bulk dataset/catalog download, extract target rows",
     MODE_RESTRICTED: "Report honestly; do not attempt",
 }
 
@@ -233,6 +243,8 @@ __all__ = [
     "SourceDefinition", "SOURCE_REGISTRY", "get_source", "get_source_metadata",
     "get_all_registered_sources", "get_sources_for_feature", "credential_env_for",
     "get_source_capability_matrix", "get_sources_by_mode",
-    "MODE_API_COUNTRY_QUERY", "MODE_BULK_JOB", "MODE_RESTRICTED",
+    "MODE_COUNTRY_API", "MODE_BULK_DATASET", "MODE_GRID_SPATIAL_SUBSET",
+    "MODE_POINT_API", "MODE_RESTRICTED",
+    "MODE_API_COUNTRY_QUERY", "MODE_BULK_JOB",
     "ACQUISITION_MODES",
 ]

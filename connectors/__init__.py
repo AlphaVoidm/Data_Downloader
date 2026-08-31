@@ -38,6 +38,9 @@ def get_connector(source_id: str):
     if source_id == "era5":
         from .era5 import era5_connector
         return era5_connector
+    if source_id == "cmip6":
+        from .cmip6 import cmip6_connector
+        return cmip6_connector
     from .misc import (
         aemo_connector, eurostat_connector, iea_connector,
         irena_connector, nager_connector, owid_connector,
