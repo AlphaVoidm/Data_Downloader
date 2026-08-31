@@ -32,6 +32,8 @@ The connector therefore:
 """
 from __future__ import annotations
 
+import io
+import os
 from pathlib import Path
 from typing import Any
 
@@ -54,6 +56,17 @@ from .base import (
 
 BASE = "https://api.ember-energy.org/v1/"
 KEY_ENV = "EMBER_API_KEY"
+
+# Ember's open bulk long-format CSVs (public downloads bucket). Used as the
+# documented fallback when the API returns zero rows for a country: "API zero"
+# must never be conflated with "Ember does not have this country". Configurable
+# via the EMBER_BULK_URLS env var (comma-separated).
+_BULK_URLS = (
+    "https://storage.googleapis.com/emb-prod-bkt-publicdata/public-downloads/"
+    "monthly_full_release_long_format.csv",
+    "https://storage.googleapis.com/emb-prod-bkt-publicdata/public-downloads/"
+    "yearly_full_release_long_format.csv",
+)
 
 # feature -> dataset (resolution is always "monthly" for HGT-QF)
 _DATASET_BY_FEATURE = {
@@ -311,6 +324,65 @@ def _request(
     return last_resp, last_result, entity
 
 
+def _bulk_urls() -> list[str]:
+    extra = [u.strip() for u in os.getenv("EMBER_BULK_URLS", "").split(",") if u.strip()]
+    return extra + list(_BULK_URLS)
+
+
+def _bulk_demand(
+    country: str, start_year: int, end_year: int, history: list[Any] | None = None,
+) -> pd.DataFrame | None:
+    """Documented bulk fallback: extract the genuine "Demand" series for a
+    country from Ember's open long-format CSV (entity_code = ISO-3).
+
+    Returns a (date, value) DataFrame or None. Never manufactures demand from
+    "Total generation" — only the "Demand" series row is used.
+    """
+    rec = get_country_record(country)
+    name = rec.country_name if rec else country
+    for url in _bulk_urls():
+        try:
+            resp = _HTTP.get(url, timeout=300, history=history)
+        except ConnectorError:
+            continue
+        if resp.status_code != 200:
+            continue
+        try:
+            raw = pd.read_csv(io.BytesIO(resp.content), low_memory=False)
+        except Exception:  # noqa: BLE001
+            continue
+        entity_col = next((c for c in raw.columns if c.strip().lower() == "entity_code"), None)
+        series_col = next((c for c in raw.columns if c.strip().lower() == "series"), None)
+        date_col = _find_date_col(list(raw.columns))
+        if entity_col is None or series_col is None or date_col is None:
+            continue
+        sub = raw[raw[entity_col].astype(str).str.strip().str.upper() == country.upper()]
+        if sub.empty:
+            # fall back to entity name matching (bulk file may use names)
+            ent_col2 = next((c for c in raw.columns if c.strip().lower() == "entity"), None)
+            if ent_col2 is not None:
+                sub = raw[raw[ent_col2].astype(str).str.strip().str.casefold() == name.casefold()]
+        if sub.empty:
+            continue
+        demand = sub[sub[series_col].astype(str).str.strip().str.casefold() == "demand"]
+        if demand.empty:
+            continue
+        value_col = _pick_value_col(list(raw.columns), _DEMAND_VALUE_COLS)
+        if value_col is None:
+            value_col = _pick_value_col(list(raw.columns), _GEN_VALUE_COLS)
+        if value_col is None:
+            continue
+        out = demand[[date_col, value_col]].rename(columns={value_col: "value"})
+        out["date"] = pd.to_datetime(out["date"], errors="coerce")
+        out["value"] = pd.to_numeric(out["value"], errors="coerce")
+        out = out.dropna(subset=["date", "value"])
+        out = out[(out["date"].dt.year >= start_year) & (out["date"].dt.year <= end_year)]
+        out = out.sort_values("date").drop_duplicates(subset=["date"], keep="first")
+        if not out.empty:
+            return out[["date", "value"]].reset_index(drop=True)
+    return None
+
+
 def discover_ember_series(
     country: str, key: str, start_year: int = 2024, end_year: int = 2024,
     resolution: str = "monthly",
@@ -434,6 +506,15 @@ def acquire_ember(
         if err:
             last_result = result
             continue
+
+    if (df is None or df.empty) and feature == "electricity_demand":
+        # Documented bulk-dataset fallback: the API may return zero rows (e.g.
+        # entity/filter mismatch), but Ember's open long-format CSV still
+        # carries the country's genuine "Demand" series.
+        bulk = _bulk_demand(country, start_year, end_year, history)
+        if bulk is not None and not bulk.empty:
+            df = bulk
+            entity = entity or {"entity_code": country, "resolution_method": "bulk_fallback"}
 
     if df is None or df.empty:
         # Dataset discovery: report what Ember ACTUALLY has for this country

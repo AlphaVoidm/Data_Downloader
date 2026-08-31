@@ -41,7 +41,6 @@ from directory_structure import (
     get_raw_path,
 )
 from eia_adapter import get_eia_hourly_demand, save_eia_data
-from ember_adapter import get_ember_monthly_demand, save_ember_data
 from entsoe_adapter import get_entsoe_total_load, save_entsoe_data
 from inventory_engine import generate_all_inventory_reports
 from provenance import (
@@ -291,6 +290,20 @@ def _get_json(
 # Source Adapters (Preserving 100% Raw Native Values)
 # ============================================================================
 
+def _root_from_output(output: Path) -> Path:
+    """Recover the acquisition root from a legacy raw-file path.
+
+    Legacy paths look like <root>/raw/<domain>/<category>/<source>/<ISO3>.csv;
+    the connectors write under the same <root>. Walk up to the 'raw' directory
+    and return its parent (falling back to the file's own directory).
+    """
+    p = Path(output)
+    for ancestor in p.parents:
+        if ancestor.name == "raw":
+            return ancestor.parent
+    return p.parent
+
+
 def _ember_adapter_wrapper(
     country: str,
     output: Path,
@@ -298,24 +311,73 @@ def _ember_adapter_wrapper(
     end: int,
     credentials: dict[str, str] | None = None,
 ) -> tuple[int, str, str]:
-    """Execute Ember monthly electricity data adapter."""
-    api_key = (credentials or {}).get("EMBER_API_KEY") or os.getenv("EMBER_API_KEY")
-    result = get_ember_monthly_demand(country, start, end, api_key=api_key)
+    """Ember monthly demand — delegates to the modern connector (entity
+    resolution + API query + documented bulk fallback)."""
+    from connectors.ember import acquire_ember
 
-    if not result["success"]:
-        return 0, result.get("status_type", "ACCESS_RESTRICTED"), result.get("message", "")
+    key = (credentials or {}).get("EMBER_API_KEY") or os.getenv("EMBER_API_KEY")
+    outcome = acquire_ember(country, "electricity_demand", start, end, key, _root_from_output(output))
+    records, status, message = _outcome_to_pipeline(outcome)
+    if records:
+        # Mirror a copy at the legacy raw path for backward-compatible layout.
+        try:
+            src = Path(outcome.path)
+            if src.exists() and src != output:
+                output.parent.mkdir(parents=True, exist_ok=True)
+                pd.read_csv(src).to_csv(output, index=False)
+        except Exception:  # noqa: BLE001
+            pass
+    return records, status, message
 
-    data = result.get("data")
-    if data is None or data.empty:
-        return 0, "NO_DATA_AVAILABLE", "Ember returned 0 records for requested period"
 
-    save_ember_data(data, output, country)
-    generate_file_sidecar(
-        output, "Ember", country, "monthly",
-        "https://api.ember-energy.org/v1/electricity-generation/monthly",
-        {"country": country, "start": start, "end": end},
-    )
-    return len(data), "SUCCESS", f"{len(data):,} monthly demand/generation records retrieved"
+def _outcome_to_pipeline(outcome: Any) -> tuple[int, str, str]:
+    """Map a connectors AcquisitionOutcome onto the pipeline status vocabulary."""
+    status = getattr(outcome, "status", "API_ERROR")
+    message = getattr(outcome, "message", "")
+    records = getattr(outcome, "records", 0)
+    mapping = {
+        "SUCCESS": "SUCCESS",
+        "PARTIAL_SUCCESS": "PARTIAL_SUCCESS",
+        "NO_DATA": "NO_DATA_AVAILABLE",
+        "NO_DATA_FOR_COUNTRY_INDICATOR": "NO_DATA_AVAILABLE",
+        "NO_RECORDS": "NO_DATA_AVAILABLE",
+        "EMPTY_RESPONSE": "NO_DATA_AVAILABLE",
+        "AUTH_FAILED": "ACCESS_RESTRICTED",
+        "RATE_LIMITED": "API_ERROR",
+        "NETWORK_ERROR": "DOWNLOAD_ERROR",
+        "TIMEOUT": "DOWNLOAD_ERROR",
+        "RETRY_EXHAUSTED": "DOWNLOAD_ERROR",
+        "SOURCE_TEMPORARY_FAILURE": "API_ERROR",
+        "INVALID_REQUEST": "API_ERROR",
+        "ENDPOINT_OR_INDICATOR_NOT_FOUND": "API_ERROR",
+        "SCHEMA_MISMATCH": "INVALID_RESPONSE",
+        "PARSE_ERROR": "INVALID_RESPONSE",
+        "NON_DATA_RESPONSE": "INVALID_RESPONSE",
+        "MAPPING_REQUIRED": "MAPPING_MISSING",
+        "NOT_SUPPORTED": "ACCESS_RESTRICTED",
+        "NOT_VERIFIED": "MAPPING_MISSING",
+        "CONFIGURATION_ERROR": "API_ERROR",
+    }
+    return records, mapping.get(status, status), message
+
+
+def _grid_adapter_wrapper(source_id: str, feature: str, extra: dict[str, Any] | None = None):
+    """Factory: wrap a gridded/scenario connector into a pipeline adapter."""
+    def _adapter(
+        country: str, output: Path, start: int, end: int,
+        credentials: dict[str, str] | None = None,
+    ) -> tuple[int, str, str]:
+        from connectors import get_connector
+        connector = get_connector(source_id)
+        if connector is None:
+            return 0, "MAPPING_MISSING", f"No connector registered for {source_id}"
+        verification, outcome = connector(
+            country, feature, start, end, credentials, _root_from_output(output),
+            **(extra or {}),
+        )
+        records, status, message = _outcome_to_pipeline(outcome)
+        return records, status, message
+    return _adapter
 
 
 def _entsoe_adapter_wrapper(
@@ -709,6 +771,13 @@ ADAPTERS: dict[str, Callable[..., tuple[int, str, str]]] = {
     "Nager.Date": _nager_date_adapter,
     "NASA POWER": _nasa_power_adapter,
     "ESO / NESO": _neso_adapter,
+    # Gridded/scenario sources now have real extraction engines — no more
+    # "research specification phase" placeholders.
+    "ERA5 / CDS": _grid_adapter_wrapper("era5", "temperature_2m"),
+    "CMIP6 / CDS": _grid_adapter_wrapper("cmip6", "tas", {"variable": "tas",
+                                                           "experiment": "historical"}),
+    "IIASA SSP": _grid_adapter_wrapper("iiasa", "ssp_population", {"scenario": "SSP2"}),
+    "GPWv4": _grid_adapter_wrapper("gpwv4", "total_population"),
 }
 
 
@@ -763,22 +832,21 @@ def run_pipeline(
             retrieved_at = datetime.now(timezone.utc).isoformat()
             output = get_raw_path(root, source.name, country, source.frequency)
 
-            # 1. Pre-Flight Capability & Area Mapping Check
+            # 1. Pre-Flight Capability & Area Mapping Check.
+            #    Gridded/bulk sources (ERA5, CMIP6, GPWv4, IIASA) are globally
+            #    covered, so a "not covered" verdict is no longer possible for
+            #    them — only genuinely territory-limited sources (NESO/AEMO/EIA/
+            #    ENTSO-E) ever return SOURCE_NOT_COVERED here.
             cap_status, cap_reason = validate_source_capability(country, source.name)
-            if cap_status != "OK":
-                status_key = cap_status
-                if cap_status == "RESEARCH_TIER":
-                    status_key = "SOURCE_NOT_COVERED"
-                # For Ember specifically: always attempt regardless of pre-flight
-                # (Ember validate_source_capability always returns OK, so this is just a guard)
+            if cap_status not in ("OK", "RESEARCH_TIER"):
                 results.append(
                     SourceResult(
                         country=country,
                         country_name=c_name,
                         source=source.name,
                         mode=mode,
-                        status=status_key,
-                        status_badge=STATUS_BADGES.get(status_key, status_key),
+                        status=cap_status,
+                        status_badge=STATUS_BADGES.get(cap_status, cap_status),
                         message=cap_reason,
                         records=0,
                         raw_path="",

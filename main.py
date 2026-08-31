@@ -8,6 +8,8 @@ Subcommands
     matrix     Show the source capability matrix (mode / role / coverage / auth).
     test-source Single-source diagnostic: resolved entity/bbox, request params
                 (key excluded), auth status, HTTP/API result, record count.
+    panel       Assemble acquired feature files into a country-month panel
+                ({ISO3}_{start}_{end}.parquet) + per-feature provenance.
     acquire    Coverage-gated acquisition (endpoint verification + fallback).
     run        audit -> acquire for target-ready countries.
     countries  List registered countries.
@@ -304,6 +306,26 @@ def cmd_sources(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_panel(args: argparse.Namespace) -> int:
+    from panel import assemble_panel
+
+    countries = _parse_countries(args.countries)
+    if not countries:
+        print("No valid countries supplied.", file=sys.stderr)
+        return 2
+    result = assemble_panel(countries, args.start, args.end, args.output)
+    for p in result["panels"]:
+        if "error" in p:
+            print(f"  ! {p.get('iso3', '?')}: {p['error']}", file=sys.stderr)
+        else:
+            print(f"  {p['iso3']}: {p['panel']}")
+    if result["combined"]:
+        print(f"\nCombined panel: {result['combined']}")
+    print(f"\nProvenance sidecars written alongside each panel ("
+          f"{args.output}/panel/<ISO3>_<start>_<end>_provenance.csv).")
+    return 0
+
+
 def cmd_rebuild_country_registry(args: argparse.Namespace) -> int:
     from country_registry import regenerate_country_registry
     out = regenerate_country_registry()
@@ -377,8 +399,17 @@ def cmd_test_source(args: argparse.Namespace) -> int:
         diag = diagnose_cmip6(country, args.variable or "tas",
                               args.experiment or "historical", args.model,
                               args.start, args.end, creds)
+    elif source == "iiasa":
+        from connectors.iiasa import diagnose_iiasa
+        diag = diagnose_iiasa(country, args.feature or "ssp_population",
+                              args.experiment or "SSP2", args.start, args.end,
+                              Path(args.output))
+    elif source == "gpwv4":
+        from connectors.gpwv4 import diagnose_gpwv4
+        diag = diagnose_gpwv4(country, args.feature or "total_population",
+                              args.start, args.end, Path(args.output))
     else:
-        print(f"Unsupported source {args.source!r}. Supported: ember, cds/era5, cmip6.",
+        print(f"Unsupported source {args.source!r}. Supported: ember, cds/era5, cmip6, iiasa, gpwv4.",
               file=sys.stderr)
         return 2
 
@@ -425,6 +456,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_test.add_argument("--end", type=int, default=2024, help="End year (default 2024)")
     p_test.add_argument("--output", default="hgt_qf_data", help="Output root directory")
     p_test.set_defaults(func=cmd_test_source)
+
+    p_panel = sub.add_parser("panel", help="Assemble acquired features into a country-month panel + provenance")
+    _add_common_args(p_panel)
+    p_panel.set_defaults(func=cmd_panel)
 
     p_run = sub.add_parser("run", help="audit -> acquire for target-ready countries")
     _add_common_args(p_run)

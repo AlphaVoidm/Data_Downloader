@@ -27,19 +27,21 @@ never keep multi-GB global rasters when a country-level monthly value is suffici
 |---|-----------|--------|
 | 1 | Country Registry (ISO-3, name, region, centroid, bbox) | `country_registry.py` |
 | 2 | Feature Registry (target / core / extended / optional / excluded) | `feature_registry.py` |
-| 3 | Source Registry (14 sources + capability matrix: mode / role) | `source_registry.py` |
+| 3 | Source Registry (16 sources + capability matrix: mode / role) | `source_registry.py` |
 | 4 | Coverage Engine (deterministic discovery, no HTTP) | `coverage_engine.py` |
 | 5 | Response Validator (never trust HTTP 200) | `response_validator.py` |
-| 6 | Connectors (EIA / ENTSO-E / CDS / Ember / NASA / …) | `connectors/` |
-| 7 | Acquisition Engine (coverage-gated, fallback download) | `acquisition_engine.py` |
-| 8 | Source-status vocabulary (`SOURCE_*` fallback reporting) | `status_vocabulary.py` |
-| 9 | Credential Manager (env/.env only, masked, never printed) | `credential_manager.py` |
-| 10 | Auth Check (tiny per-source auth/endpoint probes) | `auth_check.py` |
-| 11 | Acquisition Plan (dry-run source resolution) | `acquisition_plan.py` |
-| 12 | Readiness Evaluation (TARGET / FEATURE / RESEARCH, diverse) | `readiness.py` |
-| 13 | Research configuration (researcher-adjustable thresholds) | `research_config.py` |
-| 14 | Availability Audit (Reports A &amp; C) | `availability_audit.py` |
-| 15 | Acquisition Report &amp; Provenance (Report B) | `acquisition_report.py` |
+| 6 | Connectors (EIA / ENTSO-E / CDS / Ember / NASA / GPWv4 / IIASA / …) | `connectors/` |
+| 7 | Acquisition Engines (country-api / grid / scenario-bulk dispatch) | `engines/` |
+| 8 | Acquisition Engine (coverage-gated, fallback download) | `acquisition_engine.py` |
+| 9 | Panel + Provenance (country-month Parquet, no imputation) | `panel.py` |
+| 10 | Source-status vocabulary (`SOURCE_*` fallback reporting) | `status_vocabulary.py` |
+| 11 | Credential Manager (env/.env only, masked, never printed) | `credential_manager.py` |
+| 12 | Auth Check (tiny per-source auth/endpoint probes) | `auth_check.py` |
+| 13 | Acquisition Plan (dry-run source resolution) | `acquisition_plan.py` |
+| 14 | Readiness Evaluation (TARGET / FEATURE / RESEARCH, diverse) | `readiness.py` |
+| 15 | Research configuration (researcher-adjustable thresholds) | `research_config.py` |
+| 16 | Availability Audit (Reports A &amp; C) | `availability_audit.py` |
+| 17 | Acquisition Report &amp; Provenance (Report B) | `acquisition_report.py` |
 
 Configuration lives in `config/`:
 
@@ -68,11 +70,41 @@ are never treated like per-country tabular APIs:
 | `bulk_dataset` | AEMO, OWID, IRENA | Bulk catalog download; extract target rows |
 | `restricted` | IEA | Report honestly; do not attempt |
 
-Historical climate is **NASA POWER (primary) → ERA5 (fallback)**. ERA5 and
-CMIP6 are *globally gridded* — a country is never "not covered"; acquisition is
-a spatial subset. CMIP6 (model + experiment + variable + bbox) is used for
+Historical climate is **NASA POWER (primary) → ERA5 (fallback)**. ERA5, CMIP6
+and GPWv4 are *globally gridded* — a country is never "not covered"; acquisition
+is a spatial subset (bbox → CDS sub-region / raster zonal statistics → compact
+country-level output). CMIP6 (model + experiment + variable + bbox) is used for
 **future/scenario** runs (e.g. `historical tas 2000-2014`, `ssp245 tas
-2015-2100`) and is never used to backfill the 2000–2024 historical pipeline.
+2015-2100`); IIASA SSP (scenario + variable + country) is a bulk scenario
+source cached once and extracted per country — both are never used to backfill
+the 2000–2024 historical pipeline.
+
+### Three acquisition engines
+
+Sources are dispatched by their declared acquisition mode to one of three
+engines (`engines/`), not a single generic connector:
+
+| Engine | Mode(s) | Sources | Behavior |
+|--------|---------|---------|----------|
+| `country_api_engine` | `country_api` | Ember, World Bank, Nager, ENTSO-E, EIA, NESO, Eurostat | resolve provider id → query → validate → save |
+| `grid_engine` | `grid_spatial_subset`, `point_api` | ERA5/CDS, CMIP6/CDS, GPWv4, NASA POWER | bbox/centroid → spatial subset → zonal/area aggregation → compact file; temp rasters deleted |
+| `scenario_bulk_engine` | `bulk_dataset` | IIASA SSP, OWID, IRENA, AEMO | cache the bulk artifact once → extract the country's rows |
+| `restricted` | `restricted` | IEA | report honestly; never attempt |
+
+Every engine returns the same `(EndpointVerification, AcquisitionOutcome)`
+pair, and the results feed the panel layer.
+
+### Normalization layer → country-month panel
+
+`panel.py` reads the acquired feature files and assembles
+`panel/{ISO3}_{start}_{end}.parquet` (+ CSV + a per-feature `_provenance.csv`):
+
+* monthly features occupy their native month rows;
+* annual features occupy the January row of their year (**never forward-filled
+  — no interpolation/imputation**);
+* features with no acquired file are NaN and flagged `MISSING` in provenance;
+* provenance records source, dataset, variable, unit, frequency, aggregation
+  method, and quality flag for every feature.
 
 ### Feature model (locked hierarchy, 25 features)
 
@@ -186,12 +218,17 @@ python main.py matrix
 python main.py test-source ember --country EGY --feature electricity_demand --start 2000 --end 2024
 python main.py test-source cds   --country EGY --feature temperature_2m      --start 2000 --end 2001
 python main.py test-source cmip6 --country EGY --variable tas --experiment ssp245 --start 2015 --end 2100
+python main.py test-source iiasa --country EGY --feature ssp_population --experiment SSP2 --start 2010 --end 2100
+python main.py test-source gpwv4 --country EGY --feature total_population --start 2000 --end 2020
 
 # 6) ACQUISITION — only after plan + auth-check are validated.
 python main.py acquire --countries EGY DEU GBR --features electricity_demand temperature_2m \
     --start 2000 --end 2024 --output hgt_qf_data
 
-# 7) audit -> acquire for TARGET_READY countries (--research-ready to tighten)
+# 7) PANEL — assemble acquired features into EGY_2000_2024.parquet + provenance
+python main.py panel --countries EGY --start 2000 --end 2024 --output hgt_qf_data
+
+# 8) audit -> acquire for TARGET_READY countries (--research-ready to tighten)
 python main.py run --start 2000 --end 2024 --output hgt_qf_data --min-core-coverage 0.8
 
 # Introspection

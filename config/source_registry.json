@@ -676,5 +676,94 @@
     "acquisition_mode": "grid_spatial_subset",
     "role": "future_scenario",
     "notes": "Globally gridded model archive; acquired via connectors/cmip6.py (model + experiment + variable + country bbox spatial-subset -> country-level monthly series). Historical + SSP scenarios."
+  },
+  "gpwv4": {
+    "source_name": "GPWv4",
+    "provider": "NASA SEDAC (CIESIN Columbia)",
+    "dataset_name": "Gridded Population of the World v4",
+    "organization": "CIESIN / NASA SEDAC",
+    "features": [
+      "total_population",
+      "population_density"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Globally gridded population-density raster (30 arc-sec), 2000/2005/2010/2015/2020 epochs",
+      "discovery": "country bbox -> zonal sum of density x cell area"
+    },
+    "frequencies": [
+      "5-year"
+    ],
+    "historical": {
+      "start": 2000,
+      "end": 2020
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://sedac.ciesin.columbia.edu/downloads/data/gpw-v4/gpw-v4-population-density-rev11/",
+    "dataset_id": "gpw-v4-population-density-rev11",
+    "country_mapping": "country bbox (zonal statistics over raster)",
+    "unit": "persons / persons/km2",
+    "priority": {
+      "total_population": 2
+    },
+    "documentation_url": "https://sedac.ciesin.columbia.edu/data/collection/gpw-v4",
+    "access_method": "raster zonal statistics (rasterio)",
+    "rate_limit": "none (bulk GeoTIFF download, cached)",
+    "license": "CC-BY-4.0 (SEDAC)",
+    "academic_relevance": "Population verification source for World Bank totals",
+    "public_access": "open",
+    "api_available": false,
+    "acquisition_mode": "grid_spatial_subset",
+    "role": "fallback",
+    "notes": "Gridded raster; acquired via connectors/gpwv4.py zonal extraction over the country bbox, never a country row lookup."
+  },
+  "iiasa": {
+    "source_name": "IIASA SSP",
+    "provider": "IIASA Energy, Climate, and Environment Program",
+    "dataset_name": "Shared Socioeconomic Pathways (SSP) database",
+    "organization": "IIASA",
+    "features": [
+      "ssp_population",
+      "ssp_gdp",
+      "ssp_urban_population"
+    ],
+    "coverage": {
+      "scope": "global",
+      "description": "Country-level SSP projections (population, GDP, urbanization) 2010-2100",
+      "discovery": "bulk IAMC CSV cached once; extract country ISO-3 rows"
+    },
+    "frequencies": [
+      "5-year"
+    ],
+    "historical": {
+      "start": 2010,
+      "end": 2100
+    },
+    "auth": {
+      "required": false,
+      "type": "none",
+      "env": "",
+      "param": ""
+    },
+    "endpoint": "https://data.ece.iiasa.ac.at/ssp/",
+    "dataset_id": "ssp_basic_drivers_release_3.0",
+    "country_mapping": "ISO-3 region codes in the IAMC CSV",
+    "unit": "persons(millions) / billion US$2017 PPP",
+    "priority": {},
+    "documentation_url": "https://tntcat.iiasa.ac.at/SspDb/",
+    "access_method": "bulk CSV.gz download (cached) -> country rows",
+    "rate_limit": "none (bulk file, cached)",
+    "license": "CC-BY (IIASA SSP database)",
+    "academic_relevance": "Future socioeconomic scenarios (SSP1-5)",
+    "public_access": "open",
+    "api_available": true,
+    "acquisition_mode": "bulk_dataset",
+    "role": "future_scenario",
+    "notes": "Scenario-tier bulk dataset; acquired via connectors/iiasa.py (download/cache once, extract country rows). Not in the 2000-2024 historical core."
   }
 }

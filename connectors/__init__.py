@@ -41,6 +41,12 @@ def get_connector(source_id: str):
     if source_id == "cmip6":
         from .cmip6 import cmip6_connector
         return cmip6_connector
+    if source_id == "gpwv4":
+        from .gpwv4 import gpwv4_connector
+        return gpwv4_connector
+    if source_id == "iiasa":
+        from .iiasa import iiasa_connector
+        return iiasa_connector
     from .misc import (
         aemo_connector, eurostat_connector, iea_connector,
         irena_connector, nager_connector, owid_connector,
