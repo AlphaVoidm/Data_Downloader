@@ -29,7 +29,11 @@ from pipeline import (
     run_pipeline,
 )
 from source_mapping import load_source_area_mappings
-from source_registry import get_all_registered_sources
+from source_registry import (
+    ACQUISITION_MODES,
+    get_all_registered_sources,
+    get_source_capability_matrix,
+)
 
 load_dotenv()
 st.set_page_config(
@@ -136,6 +140,8 @@ with st.sidebar:
 tabs = st.tabs([
     "🚀 Acquisition & Status",
     "🧭 Availability Audit",
+    "🔑 Credentials & Auth Check",
+    "🧩 Source Capability Matrix",
     "🗺️ Source Area Mappings",
     "🌐 Country Coverage Inventory",
     "📦 Feature Inventory (25 Vars)",
@@ -254,6 +260,27 @@ with tabs[0]:
             hide_index=True,
         )
         st.info(f"📁 Raw source-native datasets are stored unmutated under `{st.session_state.output_root}/raw`")
+
+        # Actionable per-item diagnosis — never a vague "request failed".
+        _ACTION_HINTS = {
+            "ACCESS_RESTRICTED": "Supply/rotate the credential (see 🔑 Credentials & Auth Check).",
+            "AUTH_FAILED": "Credential rejected — rotate the key/token.",
+            "MAPPING_MISSING": "Add the provider area code to config/source_area_mapping.csv.",
+            "SOURCE_NOT_COVERED": "Source does not publish this country — skip, not a failure.",
+            "NO_DATA_AVAILABLE": "HTTP 200 with zero records — no data for this combo, not a failure.",
+            "API_ERROR": "Endpoint returned an error/rate-limit — retry later.",
+            "DOWNLOAD_ERROR": "Network/download problem — retry (retry/backoff applied upstream).",
+            "INVALID_RESPONSE": "HTTP 200 but not real data (portal/HTML) — check endpoint config.",
+        }
+        problem_rows = df_res[df_res["status"] != "SUCCESS"]
+        if not problem_rows.empty:
+            with st.expander("🔍 Per-source diagnosis (non-success items)", expanded=True):
+                for _, row in problem_rows.iterrows():
+                    hint = _ACTION_HINTS.get(row["status"], "Review the detail message.")
+                    st.markdown(
+                        f"**{row['source']}** · {row['country_name']} · `{row['status']}`\n\n"
+                        f"{row['message']}\n\n→ **Action:** {hint}"
+                    )
     else:
         st.subheader("Source Plan for Current Mode")
         active_sources = [s for s in SOURCES if s.mode == mode]
@@ -360,9 +387,113 @@ with tabs[1]:
                 st.dataframe(pd.read_csv(report_a), use_container_width=True, hide_index=True)
 
 # ============================================================================
-# Tab 3: Source Area Mappings
+# Tab 3: Credentials & Auth Check
 # ============================================================================
 with tabs[2]:
+    st.subheader("🔑 Credential Propagation & Source Auth Check")
+    st.markdown(
+        "Tests each credential-protected source with a **tiny** request **before** any "
+        "25-year download. Credentials flow: **sidebar input → credential manager → "
+        "connector → API**. Real keys are never displayed, logged, or written to reports."
+    )
+
+    from credential_manager import load_credentials as _load_creds, masked as _masked, is_supplied as _supplied
+    from auth_check import run_auth_checks as _run_auth_checks
+
+    norm_creds = _load_creds(entered_credentials)
+
+    col_btn, col_note = st.columns([1, 2])
+    with col_btn:
+        run_auth_btn = st.button("🔑 Run Auth Check", type="primary", use_container_width=True)
+    with col_note:
+        st.caption(
+            "In this sandbox outbound network is blocked, so live probes will report "
+            "ENDPOINT_UNAVAILABLE / NETWORK_ERROR. Locally they perform the real "
+            "Ember / ENTSO-E / EIA probes and the CDS client check."
+        )
+
+    # Per-source credential status (masked).
+    with st.expander("Credential status (masked)", expanded=True):
+        rows = []
+        for src_id in ("ember", "entsoe", "eia", "era5"):
+            from credential_manager import format_ok as _fmt_ok
+            ok, note = _fmt_ok(src_id, norm_creds)
+            rows.append({
+                "Source": src_id.upper(),
+                "Supplied": "✓" if _supplied(src_id, norm_creds) else "—",
+                "Format": "VALID" if ok else ("INVALID" if _supplied(src_id, norm_creds) else "—"),
+                "Note": note,
+                "Masked": _masked(src_id, norm_creds) or "—",
+            })
+        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+    if run_auth_btn:
+        with st.spinner("Running tiny per-source auth probes…"):
+            auth_results = _run_auth_checks(norm_creds)
+        st.session_state.auth_check_results = auth_results
+    else:
+        auth_results = st.session_state.get("auth_check_results")
+
+    if auth_results:
+        for r in auth_results:
+            icon = "✅" if r.endpoint_available else ("🔑" if r.status in ("AUTH_FAILED", "CONFIGURATION_ERROR") else "⚠️")
+            with st.container(border=True):
+                st.markdown(f"**{icon} {r.source_name}**  (`{r.source_id}`)")
+                c1, c2, c3, c4 = st.columns(4)
+                c1.metric("Credential supplied", "YES" if r.credential_supplied else "NO")
+                c2.metric("Credential format", "VALID" if r.credential_format_ok else "INVALID")
+                c3.metric("API response", f"HTTP {r.http_status}" if r.http_status is not None else "—")
+                c4.metric("Result", r.status)
+                if r.endpoint_available:
+                    st.success(f"Endpoint available — {r.message}")
+                elif r.status in ("AUTH_FAILED", "CONFIGURATION_ERROR"):
+                    st.error(f"{r.message} — Action: fix credential propagation (supply/rotate the key).")
+                else:
+                    st.warning(r.message)
+                st.caption(f"Masked key: {r.masked_credential or '(none)'}")
+
+# ============================================================================
+# Tab 4: Source Capability Matrix
+# ============================================================================
+with tabs[3]:
+    st.subheader("🧩 Source Capability Matrix")
+    st.markdown(
+        "How each source is **supposed** to be acquired — mode, role, coverage, auth, "
+        "resolution, and expected response. Three acquisition modes: "
+        "**API/country query**, **bulk/targeted job**, and **restricted**."
+    )
+    df_matrix = pd.DataFrame(get_source_capability_matrix())
+    st.dataframe(
+        df_matrix[[
+            "source", "role", "acquisition_mode", "country_coverage",
+            "temporal_resolution", "authentication", "historical_coverage",
+            "rate_limit", "expected_response",
+        ]].rename(columns={
+            "source": "Source",
+            "role": "Role",
+            "acquisition_mode": "Acquisition Mode",
+            "country_coverage": "Coverage",
+            "temporal_resolution": "Temporal",
+            "authentication": "Auth",
+            "historical_coverage": "History",
+            "rate_limit": "Rate Limit",
+            "expected_response": "Expected Response",
+        }),
+        use_container_width=True,
+        hide_index=True,
+    )
+    st.markdown("**Acquisition modes:**")
+    for mode, label in ACQUISITION_MODES.items():
+        st.markdown(f"- `{mode}` — {label}")
+    st.info(
+        "CMIP6 is registered as `future_scenario` only — it is **never** part of the "
+        "historical 2000–2024 pipeline (NASA POWER primary → ERA5 fallback)."
+    )
+
+# ============================================================================
+# Tab 5: Source Area Mappings
+# ============================================================================
+with tabs[4]:
     st.subheader("🗺️ Verified Source-Specific Geographic Area Mappings")
     st.markdown("Maps canonical ISO-3 country codes to provider-specific identifiers (ENTSO-E EIC codes, EIA balancing authorities, AEMO region codes).")
 
@@ -393,9 +524,9 @@ with tabs[2]:
         st.warning("No mappings found in config/source_area_mapping.csv.")
 
 # ============================================================================
-# Tab 4: Country Coverage Inventory
+# Tab 6: Country Coverage Inventory
 # ============================================================================
-with tabs[3]:
+with tabs[5]:
     st.subheader("🌐 Country-Level Research Data Inventory")
     st.markdown("Availability matrix mapping candidate countries against HGT-QF feature domains.")
 
@@ -442,9 +573,9 @@ with tabs[3]:
         st.info("Country coverage inventory will be generated automatically after acquisition.")
 
 # ============================================================================
-# Tab 5: Feature Inventory (25 Variables)
+# Tab 7: Feature Inventory (25 Variables)
 # ============================================================================
-with tabs[4]:
+with tabs[6]:
     st.subheader("📦 HGT-QF 25-Feature Research Input Space Inventory")
     st.markdown("Authoritative specifications for all 25 conceptual variables defined in the HGT-QF research design.")
 
@@ -480,9 +611,9 @@ with tabs[4]:
     )
 
 # ============================================================================
-# Tab 6: Historical Coverage & L=120 Feasibility
+# Tab 8: Historical Coverage & L=120 Feasibility
 # ============================================================================
-with tabs[5]:
+with tabs[7]:
     st.subheader("⏳ Historical Coverage Depth & Lookback Feasibility ($L=120, H=12,36,60$)")
     st.markdown("Evaluates historical time horizons of electricity demand data to determine candidate suitability for sequence modeling.")
 
@@ -530,9 +661,9 @@ with tabs[5]:
         st.info("Historical coverage analysis will appear here after electricity demand acquisition.")
 
 # ============================================================================
-# Tab 7: Dataset Manifests & Hashes
+# Tab 9: Dataset Manifests & Hashes
 # ============================================================================
-with tabs[6]:
+with tabs[8]:
     st.subheader("📜 Dataset Manifest & SHA-256 Cryptographic Audit")
     st.markdown("Reproducibility manifest recording SHA-256 hashes, file locations, request parameters, and sentinel detection.")
 
@@ -579,9 +710,9 @@ with tabs[6]:
         st.info("Dataset manifest will be compiled upon acquisition.")
 
 # ============================================================================
-# Tab 8: Source Registry & Licenses
+# Tab 10: Source Registry & Licenses
 # ============================================================================
-with tabs[7]:
+with tabs[9]:
     st.subheader("📚 Verified Source Registry, Documentation & Licensing Terms")
 
     sources_list = get_all_registered_sources()

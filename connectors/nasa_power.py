@@ -46,14 +46,16 @@ def verify_nasa(country: str) -> EndpointVerification:
         "longitude": rec.centroid_lon, "latitude": rec.centroid_lat,
         "start": "20240101", "end": "20240102", "format": "JSON",
     }
+    history: list[dict[str, Any]] = []
     try:
-        resp = _HTTP.get(ENDPOINT, params=params, timeout=60)
+        resp = _HTTP.get(ENDPOINT, params=params, timeout=60, history=history)
     except ConnectorError as exc:
         return EndpointVerification(
-            source_id="nasa_power", country=country, feature="climate", status=str(exc), message=str(exc),
+            source_id="nasa_power", country=country, feature="climate",
+            status=exc.status, message=str(exc), attempts=exc.attempts or history,
         )
     result = validate_response(resp, expected_format="json", min_records=1)
-    return verification_from_result(result, "nasa_power", country, "climate")
+    return verification_from_result(result, "nasa_power", country, "climate", attempts=history)
 
 
 def _classify_nasa_error(exc: Exception) -> str:
@@ -63,7 +65,7 @@ def _classify_nasa_error(exc: Exception) -> str:
     return "NETWORK_ERROR"
 
 
-def _fetch_daily(country: str, start_year: int, end_year: int) -> pd.DataFrame:
+def _fetch_daily(country: str, start_year: int, end_year: int, history: list[dict[str, Any]] | None = None) -> pd.DataFrame:
     rec = get_country_record(country)
     if rec is None:
         raise ValueError(f"No centroid for {country}")
@@ -76,7 +78,7 @@ def _fetch_daily(country: str, start_year: int, end_year: int) -> pd.DataFrame:
             "longitude": rec.centroid_lon, "latitude": rec.centroid_lat,
             "start": f"{year}0101", "end": f"{year}1231", "format": "JSON",
         }
-        resp = _HTTP.get(ENDPOINT, params=params, timeout=120)
+        resp = _HTTP.get(ENDPOINT, params=params, timeout=120, history=history)
         result = validate_response(resp, expected_format="json", min_records=0)
         if not result.ok:
             raise RuntimeError(result.message)
@@ -132,18 +134,27 @@ def acquire_nasa(country: str, feature: str, start_year: int, end_year: int, out
             verification_notes=["cached climate extraction"],
             provenance={"source": "NASA POWER", "params": PARAMS},
         )
+    history: list[dict[str, Any]] = []
     try:
-        daily = _fetch_daily(country, start_year, end_year)
+        daily = _fetch_daily(country, start_year, end_year, history)
+    except ConnectorError as exc:
+        return AcquisitionOutcome(
+            source_id="nasa_power", country=country, feature=feature,
+            status=exc.status, message=str(exc), failure_reason=exc.status,
+            attempts=exc.attempts or history,
+        )
     except Exception as exc:  # noqa: BLE001
         status = _classify_nasa_error(exc)
         return AcquisitionOutcome(
             source_id="nasa_power", country=country, feature=feature,
             status=status, message=str(exc)[:200], failure_reason=status,
+            attempts=history,
         )
     if daily.empty:
         return AcquisitionOutcome(
             source_id="nasa_power", country=country, feature=feature,
-            status="NO_RECORDS", message="NASA POWER returned no observations", failure_reason="NO_RECORDS",
+            status="NO_RECORDS", message="NASA POWER returned no observations",
+            failure_reason="NO_RECORDS", attempts=history,
         )
     monthly = _aggregate_monthly(daily)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -158,6 +169,7 @@ def acquire_nasa(country: str, feature: str, start_year: int, end_year: int, out
         schema_columns=list(monthly.columns),
         verification_notes=["JSON valid", "daily->monthly aggregation", "CDD/HDD from daily T2M (base 18°C)"],
         provenance={"source": "NASA POWER", "params": PARAMS, "spatial": "country centroid"},
+        attempts=history,
     )
 
 

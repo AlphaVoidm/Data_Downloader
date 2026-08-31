@@ -1,16 +1,18 @@
 {
   "_meta": {
-    "note": "HGT-QF feature configuration. Sections map to tiers: targets (TARGET), core_exogenous (CORE), extended_exogenous (EXTENDED), optional_exogenous (OPTIONAL). Tier semantics are defined in config/research_config.json. `sources` is the FEATURE-SPECIFIC ordered priority list (first = preferred). `country_overrides` re-orders sources for specific countries. `derived_from` marks features computed at extraction time from a parent feature (data extraction, not ML preprocessing).",
+    "note": "HGT-QF feature configuration. Sections map to tiers: targets (TARGET), core_exogenous (CORE), extended_exogenous (EXTENDED), optional_exogenous (OPTIONAL), excluded_exogenous (EXCLUDED). Tier semantics are defined in config/research_config.json. `sources` is the FEATURE-SPECIFIC ordered priority list (first = preferred). `country_overrides` re-orders sources for specific countries. `derived_from` marks features computed at extraction time from a parent feature (data extraction, not ML preprocessing).",
     "tier_definitions": {
       "target": "electricity demand — the forecasting target; THE fundamental requirement",
       "core": "mandatory research core — reliably obtainable explanatory variables (counted toward RESEARCH_READY)",
       "extended": "valuable contextual variables — tracked but never required for a country to qualify",
-      "optional": "coverage-limited variables (prices, EV, AC/heat-pump, holidays) — never disqualify a country"
+      "optional": "coverage-limited variables (prices, EV, AC/heat-pump, holidays) — never disqualify a country",
+      "excluded": "excluded from the core historical pipeline (AC/heat-pump penetration has no global open source; CMIP6 is future-scenario; restricted IEA never gates)"
     },
     "total_features": 25,
-    "core_count": 13,
-    "extended_count": 6,
-    "optional_count": 5
+    "core_count": 15,
+    "extended_count": 4,
+    "optional_count": 4,
+    "excluded_count": 1
   },
   "targets": [
     {
@@ -19,9 +21,19 @@
       "domain": "electricity",
       "frequency": "monthly",
       "unit": "TWh",
-      "sources": ["entsoe", "eia", "neso", "aemo", "ember"],
+      "sources": [
+        "entsoe",
+        "eia",
+        "neso",
+        "aemo",
+        "ember"
+      ],
       "country_overrides": {
-        "GBR": ["neso", "entsoe", "ember"]
+        "GBR": [
+          "neso",
+          "entsoe",
+          "ember"
+        ]
       },
       "min_history_months": 120,
       "demand_priority": true
@@ -34,7 +46,10 @@
       "domain": "climate",
       "frequency": "monthly",
       "unit": "°C",
-      "sources": ["era5", "nasa_power"]
+      "sources": [
+        "era5",
+        "nasa_power"
+      ]
     },
     {
       "concept": "solar_radiation",
@@ -42,7 +57,10 @@
       "domain": "climate",
       "frequency": "monthly",
       "unit": "kWh/m²/day",
-      "sources": ["era5", "nasa_power"]
+      "sources": [
+        "era5",
+        "nasa_power"
+      ]
     },
     {
       "concept": "wind_speed_10m",
@@ -50,7 +68,10 @@
       "domain": "climate",
       "frequency": "monthly",
       "unit": "m/s",
-      "sources": ["era5", "nasa_power"]
+      "sources": [
+        "era5",
+        "nasa_power"
+      ]
     },
     {
       "concept": "precipitation",
@@ -58,7 +79,10 @@
       "domain": "climate",
       "frequency": "monthly",
       "unit": "mm",
-      "sources": ["era5", "nasa_power"]
+      "sources": [
+        "era5",
+        "nasa_power"
+      ]
     },
     {
       "concept": "gdp",
@@ -66,7 +90,9 @@
       "domain": "economic",
       "frequency": "annual",
       "unit": "current USD",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "gdp_growth",
@@ -74,7 +100,9 @@
       "domain": "economic",
       "frequency": "annual",
       "unit": "%",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "gdp_per_capita",
@@ -82,7 +110,9 @@
       "domain": "economic",
       "frequency": "annual",
       "unit": "current USD",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "total_population",
@@ -90,7 +120,9 @@
       "domain": "demographic",
       "frequency": "annual",
       "unit": "count",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "population_growth",
@@ -98,7 +130,9 @@
       "domain": "demographic",
       "frequency": "annual",
       "unit": "%",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "urbanisation_rate",
@@ -106,7 +140,9 @@
       "domain": "demographic",
       "frequency": "annual",
       "unit": "%",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "electricity_access",
@@ -114,7 +150,9 @@
       "domain": "energy_system",
       "frequency": "annual",
       "unit": "%",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "manufacturing_value_added",
@@ -122,7 +160,9 @@
       "domain": "economic_structure",
       "frequency": "annual",
       "unit": "%",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "renewable_generation_share",
@@ -130,25 +170,43 @@
       "domain": "energy_system",
       "frequency": "monthly",
       "unit": "%",
-      "sources": ["ember", "irena"]
-    }
-  ],
-  "extended_exogenous": [
+      "sources": [
+        "ember",
+        "irena"
+      ]
+    },
+    {
+      "concept": "urban_population",
+      "name": "Urban Population",
+      "domain": "demographic",
+      "frequency": "annual",
+      "unit": "count",
+      "sources": [
+        "world_bank"
+      ]
+    },
     {
       "concept": "total_electricity_generation",
       "name": "Total Electricity Generation",
       "domain": "energy_system",
       "frequency": "monthly",
       "unit": "TWh",
-      "sources": ["ember", "world_bank"]
-    },
+      "sources": [
+        "ember",
+        "world_bank"
+      ]
+    }
+  ],
+  "extended_exogenous": [
     {
       "concept": "generation_mix",
       "name": "Generation Mix by Fuel",
       "domain": "energy_system",
       "frequency": "monthly",
       "unit": "TWh",
-      "sources": ["ember"],
+      "sources": [
+        "ember"
+      ],
       "note": "Treated as EXTENDED until a reliable public country-wide acquisition path is verified."
     },
     {
@@ -157,15 +215,9 @@
       "domain": "economic",
       "frequency": "annual",
       "unit": "%",
-      "sources": ["world_bank"]
-    },
-    {
-      "concept": "urban_population",
-      "name": "Urban Population",
-      "domain": "demographic",
-      "frequency": "annual",
-      "unit": "count",
-      "sources": ["world_bank"]
+      "sources": [
+        "world_bank"
+      ]
     },
     {
       "concept": "cooling_degree_days",
@@ -173,7 +225,10 @@
       "domain": "derived_climate",
       "frequency": "monthly",
       "unit": "degree-days",
-      "sources": ["nasa_power", "era5"],
+      "sources": [
+        "nasa_power",
+        "era5"
+      ],
       "derived_from": "temperature_2m",
       "min_source_frequency": "daily",
       "note": "Computed from DAILY temperature at extraction time (base 18°C). Requires a daily-capable temperature source."
@@ -184,7 +239,10 @@
       "domain": "derived_climate",
       "frequency": "monthly",
       "unit": "degree-days",
-      "sources": ["nasa_power", "era5"],
+      "sources": [
+        "nasa_power",
+        "era5"
+      ],
       "derived_from": "temperature_2m",
       "min_source_frequency": "daily",
       "note": "Computed from DAILY temperature at extraction time (base 18°C). Requires a daily-capable temperature source."
@@ -197,7 +255,10 @@
       "domain": "energy_system",
       "frequency": "monthly",
       "unit": "EUR/kWh",
-      "sources": ["eurostat", "iea"]
+      "sources": [
+        "eurostat",
+        "iea"
+      ]
     },
     {
       "concept": "ev_stock_sales",
@@ -205,7 +266,10 @@
       "domain": "transport",
       "frequency": "annual",
       "unit": "vehicles",
-      "sources": ["owid", "iea"]
+      "sources": [
+        "owid",
+        "iea"
+      ]
     },
     {
       "concept": "sectoral_electricity_demand",
@@ -213,16 +277,11 @@
       "domain": "built_environment",
       "frequency": "annual",
       "unit": "GWh",
-      "sources": ["eurostat", "iea", "eia"]
-    },
-    {
-      "concept": "ac_heat_pump_penetration",
-      "name": "AC / Heat-Pump Penetration",
-      "domain": "built_environment",
-      "frequency": "annual",
-      "unit": "share",
-      "sources": ["iea"],
-      "note": "No global open source identified (prior audit: 0/194). Restricted IEA datasets only — never a hard requirement."
+      "sources": [
+        "eurostat",
+        "iea",
+        "eia"
+      ]
     },
     {
       "concept": "public_holidays",
@@ -230,7 +289,22 @@
       "domain": "calendar",
       "frequency": "annual",
       "unit": "count",
-      "sources": ["nager"]
+      "sources": [
+        "nager"
+      ]
+    }
+  ],
+  "excluded_exogenous": [
+    {
+      "concept": "ac_heat_pump_penetration",
+      "name": "AC / Heat-Pump Penetration",
+      "domain": "built_environment",
+      "frequency": "annual",
+      "unit": "share",
+      "sources": [
+        "iea"
+      ],
+      "note": "No global open source identified (prior audit: 0/194). Restricted IEA datasets only — never a hard requirement."
     }
   ]
 }

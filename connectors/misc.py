@@ -9,12 +9,20 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pandas as pd
+
+from response_validator import validate_response
+
 from .base import (
     AUTH_FAILED,
     BULK_MANUAL,
+    NO_DATA,
     EndpointVerification,
     AcquisitionOutcome,
+    ConnectorError,
     _HTTP,
+    acquisition_status_for_verification,
+    verification_from_result,
 )
 
 AEMO_DATA_URL = "https://aemo.com.au/en/energy-systems/electricity/national-electricity-market-nem/data-nem"
@@ -50,6 +58,48 @@ def aemo_connector(country: str, feature: str, start: int, end: int, credentials
 
 
 # --- Nager.Date (optional calendar) -------------------------------------------
+def _nager_year(iso2: str, year: int, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fetch one year of public holidays for an ISO-2 country code.
+
+    A 204 (no holidays that year) is legitimate and yields an empty list.
+    """
+    url = NAGER_URL.format(year=year, iso2=iso2)
+    resp = _HTTP.get(url, timeout=30, history=history)
+    if resp.status_code == 204:
+        return []
+    result = validate_response(resp, expected_format="json", min_records=0)
+    if not result.ok:
+        raise RuntimeError(result.message)
+    data = resp.json()
+    return data if isinstance(data, list) else []
+
+
+def verify_nager(country: str, feature: str) -> EndpointVerification:
+    iso2 = _iso2(country)
+    if not iso2:
+        return EndpointVerification(
+            source_id="nager", country=country, feature=feature, status="MAPPING_REQUIRED",
+            message=f"No ISO-2 mapping for {country}",
+        )
+    history: list[dict[str, Any]] = []
+    try:
+        _nager_year(iso2, 2024, history)
+    except ConnectorError as exc:
+        return EndpointVerification(
+            source_id="nager", country=country, feature=feature,
+            status=exc.status, message=str(exc), attempts=exc.attempts or history,
+        )
+    except RuntimeError as exc:
+        return EndpointVerification(
+            source_id="nager", country=country, feature=feature,
+            status="NOT_VERIFIED", message=str(exc), attempts=history,
+        )
+    return EndpointVerification(
+        source_id="nager", country=country, feature=feature, status="VERIFIED",
+        message=f"Nager.Date reachable for {iso2}", attempts=history,
+    )
+
+
 def nager_connector(country: str, feature: str, start: int, end: int, credentials: dict[str, str] | None, out_dir: Path, **_: Any):
     iso2 = _iso2(country)
     if not iso2:
@@ -59,11 +109,64 @@ def nager_connector(country: str, feature: str, start: int, end: int, credential
             AcquisitionOutcome(source_id="nager", country=country, feature=feature, status="MAPPING_REQUIRED",
                                message=f"No ISO-2 mapping for {country}", failure_reason="MAPPING_REQUIRED"),
         )
-    return (
-        EndpointVerification(source_id="nager", country=country, feature=feature, status=BULK_MANUAL,
-                             message=f"Nager.Date holiday coverage available for {iso2} (deferred acquisition)"),
-        AcquisitionOutcome(source_id="nager", country=country, feature=feature, status=BULK_MANUAL,
-                           message="Optional calendar feature (deferred acquisition)", frequency="annual"),
+    verification = verify_nager(country, feature)
+    if verification.status != "VERIFIED":
+        return verification, AcquisitionOutcome(
+            source_id="nager", country=country, feature=feature,
+            status=acquisition_status_for_verification(verification.status),
+            message=verification.message, failure_reason=verification.status,
+            attempts=verification.attempts,
+        )
+
+    history: list[dict[str, Any]] = []
+    rows: list[dict[str, Any]] = []
+    try:
+        for year in range(start, end + 1):
+            for h in _nager_year(iso2, year, history):
+                rows.append({
+                    "iso3": country, "iso2": iso2, "year": year,
+                    "date": h.get("date", ""), "name": h.get("name", ""),
+                    "local_name": h.get("localName", ""),
+                    "type": ";".join(h.get("types", []) or []),
+                })
+    except ConnectorError as exc:
+        return verification, AcquisitionOutcome(
+            source_id="nager", country=country, feature=feature,
+            status=exc.status, message=str(exc), failure_reason=exc.status,
+            attempts=exc.attempts or history,
+        )
+    except RuntimeError as exc:
+        return verification, AcquisitionOutcome(
+            source_id="nager", country=country, feature=feature,
+            status="NOT_VERIFIED", message=str(exc), failure_reason="NOT_VERIFIED",
+            attempts=history,
+        )
+
+    if not rows:
+        # Legitimate: the country simply has no holidays recorded for the
+        # period. Optional feature -> the country stays fully usable.
+        return verification, AcquisitionOutcome(
+            source_id="nager", country=country, feature=feature,
+            status=NO_DATA,
+            message=f"Nager.Date returned no holiday records for {iso2} ({start}-{end})",
+            failure_reason=NO_DATA, frequency="annual", unit="count",
+            attempts=history,
+        )
+
+    df = pd.DataFrame(rows)
+    out_path = out_dir / "raw" / "calendar" / "holidays" / "nager" / f"{country}.csv"
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_csv(out_path, index=False)
+    return verification, AcquisitionOutcome(
+        source_id="nager", country=country, feature=feature,
+        status="SUCCESS", message=f"{len(df)} holiday records ({start}-{end})",
+        records=len(df), path=str(out_path), frequency="annual", unit="count",
+        requested_start=str(start), requested_end=str(end),
+        received_start=str(rows[0]["year"]), received_end=str(rows[-1]["year"]),
+        schema_columns=list(df.columns),
+        verification_notes=[f"ISO-2 {iso2}", "JSON valid"],
+        provenance={"endpoint": NAGER_URL},
+        attempts=history,
     )
 
 

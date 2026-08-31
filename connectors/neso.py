@@ -28,23 +28,27 @@ def verify_neso(country: str) -> EndpointVerification:
             source_id="neso", country=country, feature="electricity_demand",
             status="NOT_SUPPORTED", message=f"NESO publishes Great Britain data only, not {country}",
         )
+    history: list[dict[str, Any]] = []
     try:
-        resp = _HTTP.get(PACKAGE_URL, timeout=30)
+        resp = _HTTP.get(PACKAGE_URL, timeout=30, history=history)
     except ConnectorError as exc:
         return EndpointVerification(
-            source_id="neso", country=country, feature="electricity_demand", status=str(exc), message=str(exc),
+            source_id="neso", country=country, feature="electricity_demand",
+            status=exc.status, message=str(exc), attempts=exc.attempts or history,
         )
     result = validate_response(resp, expected_format="json", min_records=0)
-    return verification_from_result(result, "neso", country, "electricity_demand")
+    return verification_from_result(result, "neso", country, "electricity_demand", attempts=history)
 
 
 def acquire_neso(country: str, start_year: int, end_year: int, out_dir: Path) -> AcquisitionOutcome:
+    history: list[dict[str, Any]] = []
     try:
-        resp = _HTTP.get(PACKAGE_URL, timeout=30)
+        resp = _HTTP.get(PACKAGE_URL, timeout=30, history=history)
     except ConnectorError as exc:
         return AcquisitionOutcome(
             source_id="neso", country="GBR", feature="electricity_demand",
-            status=str(exc), message=str(exc), failure_reason=str(exc),
+            status=exc.status, message=str(exc), failure_reason=exc.status,
+            attempts=exc.attempts or history,
         )
     result = validate_response(resp, expected_format="json", min_records=0)
     if not result.ok:

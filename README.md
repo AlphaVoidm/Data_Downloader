@@ -26,46 +26,67 @@ never keep multi-GB global rasters when a country-level monthly value is suffici
 | # | Component | Module |
 |---|-----------|--------|
 | 1 | Country Registry (ISO-3, name, region, centroid, bbox) | `country_registry.py` |
-| 2 | Feature Registry (target / core / extended / optional tiers) | `feature_registry.py` |
-| 3 | Source Registry (13 sources, full metadata) | `source_registry.py` |
+| 2 | Feature Registry (target / core / extended / optional / excluded) | `feature_registry.py` |
+| 3 | Source Registry (14 sources + capability matrix: mode / role) | `source_registry.py` |
 | 4 | Coverage Engine (deterministic discovery, no HTTP) | `coverage_engine.py` |
 | 5 | Response Validator (never trust HTTP 200) | `response_validator.py` |
 | 6 | Connectors (EIA / ENTSO-E / CDS / Ember / NASA / …) | `connectors/` |
 | 7 | Acquisition Engine (coverage-gated, fallback download) | `acquisition_engine.py` |
 | 8 | Source-status vocabulary (`SOURCE_*` fallback reporting) | `status_vocabulary.py` |
-| 9 | Readiness Evaluation (TARGET / FEATURE / RESEARCH, diverse) | `readiness.py` |
-| 10 | Research configuration (researcher-adjustable thresholds) | `research_config.py` |
-| 11 | Availability Audit (Reports A &amp; C) | `availability_audit.py` |
-| 12 | Acquisition Report &amp; Provenance (Report B) | `acquisition_report.py` |
+| 9 | Credential Manager (env/.env only, masked, never printed) | `credential_manager.py` |
+| 10 | Auth Check (tiny per-source auth/endpoint probes) | `auth_check.py` |
+| 11 | Acquisition Plan (dry-run source resolution) | `acquisition_plan.py` |
+| 12 | Readiness Evaluation (TARGET / FEATURE / RESEARCH, diverse) | `readiness.py` |
+| 13 | Research configuration (researcher-adjustable thresholds) | `research_config.py` |
+| 14 | Availability Audit (Reports A &amp; C) | `availability_audit.py` |
+| 15 | Acquisition Report &amp; Provenance (Report B) | `acquisition_report.py` |
 
 Configuration lives in `config/`:
 
 ```
 config/
 ├── country_registry.csv           # 194 countries + bboxes (regenerated)
-├── feature_config.json            # 25 features in target/core/extended/optional tiers
+├── feature_config.json            # 25 features in target/core/extended/optional/excluded
 ├── research_config.json           # researcher-adjustable RESEARCH_READY thresholds
-├── source_registry.json           # centralized 13-source registry
+├── source_registry.json           # centralized source registry + capability matrix
 ├── source_area_mapping.csv        # ENTSO-E EIC / EIA / NESO / AEMO area codes
 ├── ember_monthly_geographies.csv  # Ember monthly geography set (~88)
 └── owid_ev_countries.csv          # OWID EV country set (~63)
 ```
 
-### Feature model (three tiers, 25 features)
+### Acquisition modes (three-way source execution)
+
+Every source is classified into one of three acquisition modes in
+`source_registry.json` (exposed via `python main.py matrix`):
+
+| Mode | Examples | Behavior |
+|------|----------|----------|
+| `api_country_query` | Ember, World Bank, NASA POWER, Nager, ENTSO-E, EIA, NESO | Query the country directly |
+| `bulk_job` | ERA5/CDS, CMIP6, AEMO, OWID, IRENA | Submit a targeted job; download only the extracted result |
+| `restricted` | IEA | Report honestly; do not attempt |
+
+Historical climate is **NASA POWER (primary) → ERA5 (fallback)**. CMIP6 is
+registered as a `future_scenario` source only and is **never** used to backfill
+2000–2024 (no "missing temperature → download CMIP6").
+
+### Feature model (locked hierarchy, 25 features)
 
 - **TARGET** (1): `electricity_demand` — the forecasting target; THE fundamental
   requirement. Nothing else is mandatory.
-- **CORE** (13): `temperature_2m`, `solar_radiation`, `wind_speed_10m`,
+- **CORE** (15): `temperature_2m`, `solar_radiation`, `wind_speed_10m`,
   `precipitation`, `gdp`, `gdp_growth`, `gdp_per_capita`, `total_population`,
-  `population_growth`, `urbanisation_rate`, `electricity_access`,
-  `manufacturing_value_added`, `renewable_generation_share`.
-- **EXTENDED** (6): `total_electricity_generation`, `generation_mix`,
-  `inflation_cpi`, `urban_population`, `cooling_degree_days`,
+  `population_growth`, `urban_population`, `urbanisation_rate`,
+  `electricity_access`, `manufacturing_value_added`,
+  `renewable_generation_share`, `total_electricity_generation`.
+- **EXTENDED** (4): `generation_mix`, `inflation_cpi`, `cooling_degree_days`,
   `heating_degree_days` — tracked, never required (`generation_mix` has no
   reliable public path yet, so it stays out of core).
-- **OPTIONAL** (5): `electricity_prices`, `ev_stock_sales`,
-  `sectoral_electricity_demand`, `ac_heat_pump_penetration`, `public_holidays` —
-  coverage-limited; **never disqualify a country**.
+- **OPTIONAL** (4): `electricity_prices`, `ev_stock_sales`,
+  `sectoral_electricity_demand`, `public_holidays` — coverage-limited;
+  **never disqualify a country**.
+- **EXCLUDED** (1): `ac_heat_pump_penetration` — no global open source;
+  registered for documentation only, never gates the pipeline (CMIP6 future
+  scenarios and restricted IEA datasets are likewise out of the historical path).
 
 `cooling_degree_days` / `heating_degree_days` are **derived features** computed from
 *daily* temperature at extraction time (base 18 °C) — they require a daily-capable
@@ -90,7 +111,7 @@ missing months, longest continuous run, and gap count.
   (`MONTHLY_SUFFICIENT`/…), from a configurable rule (`min_history_months`,
   `min_consecutive_months`).
 - **FEATURE_COVERAGE** — independent `core / extended / optional` counts per
-  country (e.g. `13/13`, `6/6`, `2/5`).
+  country (e.g. `15/15`, `4/4`, `2/4`).
 - **RESEARCH_READY** — `TARGET_READY` **AND** configurable minimum core coverage
   (default 80%); optional/extended features are reported but never gate.
 
@@ -146,17 +167,26 @@ python main.py audit --start 2000 --end 2024 --output hgt_qf_audit
 python main.py audit --countries EGY DEU FRA GBR USA JPN --start 2000 --end 2024
 python main.py audit --min-demand-history 300 --min-core-coverage 1.0 --require-optional
 
-# 2) ACQUISITION — only after the matrix is validated.
-#    Downloads only the countries + features you select.
+# 2) PLAN (dry-run) — resolve sources/fallbacks WITHOUT downloading
+python main.py plan --countries EGY DEU GBR --features electricity_demand temperature_2m \
+    solar_radiation wind_speed_10m --start 2000 --end 2024
+
+# 3) AUTH CHECK — tiny per-source credential/endpoint probes (never prints keys)
+python main.py auth-check
+
+# 4) CAPABILITY MATRIX — how each source is supposed to be acquired
+python main.py matrix
+
+# 5) ACQUISITION — only after plan + auth-check are validated.
 python main.py acquire --countries EGY DEU GBR --features electricity_demand temperature_2m \
     --start 2000 --end 2024 --output hgt_qf_data
 
-# 3) audit -> acquire for RESEARCH_READY countries only
+# 6) audit -> acquire for TARGET_READY countries (--research-ready to tighten)
 python main.py run --start 2000 --end 2024 --output hgt_qf_data --min-core-coverage 0.8
 
 # Introspection
 python main.py countries          # 194 registered countries
-python main.py sources            # 13 registered sources + metadata
+python main.py sources            # registered sources + metadata
 ```
 
 ### 4. Streamlit dashboard

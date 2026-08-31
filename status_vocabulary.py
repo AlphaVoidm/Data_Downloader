@@ -49,7 +49,7 @@ def source_status(status: str) -> str:
         return SOURCE_SUCCESS
 
     # not covered
-    if s in ("NOT_SUPPORTED", "UNKNOWN"):
+    if s in ("NOT_SUPPORTED", "UNKNOWN", "ENDPOINT_OR_INDICATOR_NOT_FOUND"):
         return SOURCE_NOT_COVERED
 
     # auth
@@ -57,24 +57,27 @@ def source_status(status: str) -> str:
         return SOURCE_AUTH_REQUIRED
 
     # temporarily unavailable (includes pending area/series mapping)
-    if s in ("TEMPORARILY_UNAVAILABLE", "MAPPING_REQUIRED", "BULK_MANUAL"):
+    if s in ("TEMPORARILY_UNAVAILABLE", "MAPPING_REQUIRED", "BULK_MANUAL",
+             "SOURCE_TEMPORARY_FAILURE"):
         return SOURCE_TEMPORARILY_UNAVAILABLE
 
     # rate limited
-    if s == "RATE_LIMITED":
+    if s in ("RATE_LIMITED", "RETRY_EXHAUSTED"):
         return SOURCE_RATE_LIMITED
 
-    # format / content problems
+    # format / content / request problems
     if s in ("PORTAL_HTML", "NON_DATA_RESPONSE", "INVALID_XML", "INVALID_JSON",
-             "INVALID_CSV", "SCHEMA_MISMATCH", "PARSE_ERROR"):
+             "INVALID_CSV", "SCHEMA_MISMATCH", "PARSE_ERROR", "INVALID_REQUEST"):
         return SOURCE_FORMAT_ERROR
 
-    # empty data
-    if s in ("EMPTY_RESPONSE", "NO_RECORDS"):
+    # empty data (HTTP 200 but no observations — NOT a failure)
+    if s in ("EMPTY_RESPONSE", "NO_RECORDS", "NO_DATA",
+             "NO_DATA_FOR_COUNTRY_INDICATOR"):
         return SOURCE_DATA_EMPTY
 
     # network / server errors
-    if s in ("NETWORK_ERROR", "TIMEOUT", "NOT_VERIFIED", "DEPENDENCY_MISSING", "DOWNLOAD_ERROR"):
+    if s in ("NETWORK_ERROR", "TIMEOUT", "NOT_VERIFIED", "DEPENDENCY_MISSING",
+             "DOWNLOAD_ERROR", "CONFIGURATION_ERROR"):
         return SOURCE_API_ERROR
 
     return SOURCE_API_ERROR

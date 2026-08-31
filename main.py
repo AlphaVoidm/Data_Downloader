@@ -4,6 +4,8 @@ Subcommands
 -----------
     audit      Discovery-only: country × feature × source matrix + HGT-QF readiness.
     plan       Dry-run source resolution (no downloads): selected source + fallbacks.
+    auth-check Tiny per-source credential/endpoint auth test (never prints keys).
+    matrix     Show the source capability matrix (mode / role / coverage / auth).
     acquire    Coverage-gated acquisition (endpoint verification + fallback).
     run        audit -> acquire for target-ready countries.
     countries  List registered countries.
@@ -80,12 +82,17 @@ def _resolve_features(raw: list[str] | None) -> tuple[list[str], list[str]]:
 
 _SUMMARY_BUCKETS: dict[str, list[str]] = {
     "SUCCESS": ["SUCCESS", "PARTIAL_SUCCESS"],
+    "NO_DATA": ["NO_DATA", "NO_DATA_FOR_COUNTRY_INDICATOR", "NO_RECORDS",
+                "EMPTY_RESPONSE", "SOURCE_DATA_EMPTY"],
     "FAILED": ["NETWORK_ERROR", "NOT_VERIFIED", "DOWNLOAD_ERROR", "VERIFY_FAILED",
-               "SCHEMA_MISMATCH", "PARSE_ERROR", "INVALID_RESPONSE", "NO_RECORDS",
+               "SCHEMA_MISMATCH", "PARSE_ERROR", "INVALID_RESPONSE",
                "DEPENDENCY_MISSING", "UNEXPECTED_ERROR", "FAILED", "RATE_LIMITED",
-               "TIMEOUT", "SOURCE_FORMAT_ERROR", "SOURCE_API_ERROR", "SOURCE_DATA_EMPTY"],
+               "TIMEOUT", "SOURCE_FORMAT_ERROR", "SOURCE_API_ERROR",
+               "SOURCE_TEMPORARY_FAILURE", "RETRY_EXHAUSTED", "INVALID_REQUEST",
+               "CONFIGURATION_ERROR"],
     "SKIPPED": ["SKIPPED", "MAPPING_REQUIRED", "BULK_MANUAL",
-                "TEMPORARILY_UNAVAILABLE", "SOURCE_TEMPORARILY_UNAVAILABLE"],
+                "TEMPORARILY_UNAVAILABLE", "SOURCE_TEMPORARILY_UNAVAILABLE",
+                "ENDPOINT_OR_INDICATOR_NOT_FOUND"],
     "UNSUPPORTED": ["NOT_SUPPORTED", "UNKNOWN_FEATURE", "UNKNOWN",
                     "SOURCE_NOT_COVERED"],
     "AUTH_REQUIRED": ["AUTH_REQUIRED", "AUTH_FAILED", "SOURCE_AUTH_REQUIRED"],
@@ -100,7 +107,7 @@ def _print_acquisition_summary(results: list[Any]) -> None:
         bucket = next((b for b, codes in _SUMMARY_BUCKETS.items() if status in codes), "FAILED")
         buckets[bucket] += n
     print("\nAcquisition summary:")
-    for bucket in ("SUCCESS", "FAILED", "SKIPPED", "UNSUPPORTED", "AUTH_REQUIRED"):
+    for bucket in ("SUCCESS", "NO_DATA", "FAILED", "SKIPPED", "UNSUPPORTED", "AUTH_REQUIRED"):
         print(f"  {bucket:<12} {buckets.get(bucket, 0)}")
     print("  (detail)      " + "  ".join(
         f"{s}={n}" for s, n in sorted(granular.items(), key=lambda kv: -kv[1])))
@@ -181,6 +188,30 @@ def cmd_acquire(args: argparse.Namespace) -> int:
     print(f"\nAcquisition complete: {ok}/{len(results)} country-features acquired.")
     _print_acquisition_summary(results)
     print(f"Report B: {args.output}/metadata/report_B_acquisition.csv")
+    return 0
+
+
+def cmd_auth_check(args: argparse.Namespace) -> int:
+    from auth_check import render_auth_check, run_auth_checks
+    results = run_auth_checks(_credentials())
+    print(render_auth_check(results))
+    return 0
+
+
+def cmd_matrix(args: argparse.Namespace) -> int:
+    import pandas as pd
+    from source_registry import get_source_capability_matrix
+    df = pd.DataFrame(get_source_capability_matrix())
+    cols = ["source", "features", "country_coverage", "temporal_resolution",
+            "authentication", "acquisition_mode", "historical_coverage",
+            "role", "rate_limit"]
+    print("\nSOURCE CAPABILITY MATRIX")
+    print("=" * 100)
+    print(df[cols].to_string(index=False))
+    print("\nAcquisition modes:")
+    from source_registry import ACQUISITION_MODES
+    for mode, label in ACQUISITION_MODES.items():
+        print(f"  {mode:<20} {label}")
     return 0
 
 
@@ -299,6 +330,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_plan.add_argument("--features", nargs="*", default=None,
                         help="Feature concepts/aliases (e.g. electricity_demand temperature_2m wind)")
     p_plan.set_defaults(func=cmd_plan)
+
+    p_auth = sub.add_parser("auth-check", help="Tiny per-source credential/endpoint auth test")
+    p_auth.set_defaults(func=cmd_auth_check)
+
+    p_matrix = sub.add_parser("matrix", help="Show the source capability matrix")
+    p_matrix.set_defaults(func=cmd_matrix)
 
     p_run = sub.add_parser("run", help="audit -> acquire for target-ready countries")
     _add_common_args(p_run)

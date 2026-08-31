@@ -150,7 +150,8 @@ def _extract(
     return None, "Could not identify a value column"
 
 
-def _request(country: str, start_year: int, end_year: int, key: str, dataset: str):
+def _request(country: str, start_year: int, end_year: int, key: str, dataset: str,
+             history: list[Any] | None = None):
     last_resp = None
     for entity in _entity_candidates(country):
         params = {
@@ -160,7 +161,7 @@ def _request(country: str, start_year: int, end_year: int, key: str, dataset: st
             "api_key": key,
         }
         resp = _HTTP.get(build_ember_url(dataset, "monthly", entity, str(start_year), str(end_year)),
-                         params=params, timeout=60)
+                         params=params, timeout=60, history=history)
         last_resp = resp
         result = validate_response(resp, expected_format="json", min_records=0)
         if result.ok and isinstance(result.data, list) and result.data:
@@ -177,13 +178,15 @@ def verify_ember(country: str, feature: str, key: str | None) -> EndpointVerific
             status=AUTH_FAILED, message=f"{KEY_ENV} not configured",
         )
     dataset = _DATASET_BY_FEATURE.get(feature, "electricity-generation")
+    history: list[Any] = []
     try:
-        resp, result, _entity = _request(country, 2024, 2024, key, dataset)
+        resp, result, _entity = _request(country, 2024, 2024, key, dataset, history)
     except ConnectorError as exc:
         return EndpointVerification(
-            source_id="ember", country=country, feature=feature, status=str(exc), message=str(exc),
+            source_id="ember", country=country, feature=feature,
+            status=exc.status, message=str(exc), attempts=exc.attempts or history,
         )
-    return verification_from_result(result, "ember", country, feature)
+    return verification_from_result(result, "ember", country, feature, attempts=history)
 
 
 def acquire_ember(
@@ -204,18 +207,20 @@ def acquire_ember(
 
     df: pd.DataFrame | None = None
     last_result = None
+    history: list[Any] = []
     for ds in datasets:
         try:
-            resp, result, entity = _request(country, start_year, end_year, key, ds)
+            resp, result, entity = _request(country, start_year, end_year, key, ds, history)
         except ConnectorError as exc:
             return AcquisitionOutcome(
                 source_id="ember", country=country, feature=feature,
-                status=str(exc), message=str(exc), failure_reason=str(exc),
+                status=exc.status, message=str(exc), failure_reason=exc.status,
+                attempts=exc.attempts or history,
             )
         last_result = result
         if not result.ok:
             if result.status in ("AUTH_FAILED", "RATE_LIMITED"):
-                return outcome_from_result(result, "ember", country, feature)
+                return outcome_from_result(result, "ember", country, feature, attempts=history)
             continue
         raw = pd.DataFrame(result.data)
         out_df, err = _extract(raw, feature)
@@ -231,11 +236,13 @@ def acquire_ember(
             return AcquisitionOutcome(
                 source_id="ember", country=country, feature=feature, status="NO_RECORDS",
                 message=f"Ember returned no records for {feature}", failure_reason="NO_RECORDS",
+                attempts=history, http_status=last_result.http_status,
+                response_type=last_result.content_type,
             )
         return AcquisitionOutcome(
             source_id="ember", country=country, feature=feature, status="SCHEMA_MISMATCH",
             message=f"Could not extract '{feature}' from Ember response",
-            failure_reason="SCHEMA_MISMATCH",
+            failure_reason="SCHEMA_MISMATCH", attempts=history,
         )
 
     out_df = out_df.rename(columns={out_df.columns[0]: "date"})
@@ -256,6 +263,7 @@ def acquire_ember(
         schema_columns=list(out_df.columns),
         verification_notes=[f"dataset {dataset}", "JSON valid", f"columns {list(out_df.columns)}"],
         provenance={"endpoint": build_ember_url(dataset, "monthly", country, str(start_year), str(end_year))},
+        attempts=history,
     )
 
 

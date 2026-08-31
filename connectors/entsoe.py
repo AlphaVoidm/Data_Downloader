@@ -93,15 +93,16 @@ def verify_entsoe(country: str, token: str | None) -> EndpointVerification:
         "periodStart": "202401010000",
         "periodEnd": "202401020000",
     }
+    history: list[dict[str, Any]] = []
     try:
-        resp = _HTTP.get(ENDPOINT, params=params, timeout=60)
+        resp = _HTTP.get(ENDPOINT, params=params, timeout=60, history=history)
     except ConnectorError as exc:
         return EndpointVerification(
             source_id="entsoe", country=country, feature="electricity_demand",
-            status=str(exc), message=str(exc),
+            status=exc.status, message=str(exc), attempts=exc.attempts or history,
         )
     result = validate_response(resp, expected_format="xml", min_records=1)
-    return verification_from_result(result, "entsoe", country, "electricity_demand")
+    return verification_from_result(result, "entsoe", country, "electricity_demand", attempts=history)
 
 
 def acquire_entsoe(
@@ -125,6 +126,7 @@ def acquire_entsoe(
         )
 
     all_records: list[dict[str, Any]] = []
+    history: list[dict[str, Any]] = []
     for year in range(start_year, end_year + 1):
         params = {
             "securityToken": token,
@@ -135,13 +137,14 @@ def acquire_entsoe(
             "periodEnd": f"{year}12312300",
         }
         try:
-            resp = _HTTP.get(ENDPOINT, params=params, timeout=60)
+            resp = _HTTP.get(ENDPOINT, params=params, timeout=60, history=history)
         except ConnectorError as exc:
             if all_records:
                 break  # partial data already collected
             return AcquisitionOutcome(
                 source_id="entsoe", country=country, feature="electricity_demand",
-                status=str(exc), message=str(exc), failure_reason=str(exc),
+                status=exc.status, message=str(exc), failure_reason=exc.status,
+                attempts=exc.attempts or history,
             )
         result = validate_response(resp, expected_format="xml", min_records=0)
         if result.ok:
@@ -151,7 +154,7 @@ def acquire_entsoe(
         else:
             if all_records:
                 break
-            return outcome_from_result(result, "entsoe", country, "electricity_demand")
+            return outcome_from_result(result, "entsoe", country, "electricity_demand", attempts=history)
 
     if not all_records:
         return AcquisitionOutcome(
@@ -173,6 +176,7 @@ def acquire_entsoe(
         schema_columns=list(monthly.columns),
         verification_notes=["XML valid", f"EIC {eic}", "hourly->monthly TWh aggregation"],
         provenance={"eic_code": eic, "document_type": DOCUMENT_TYPE},
+        attempts=history,
     )
 
 

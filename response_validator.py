@@ -40,6 +40,11 @@ INVALID_CSV = "INVALID_CSV"
 EMPTY_RESPONSE = "EMPTY_RESPONSE"
 SCHEMA_MISMATCH = "SCHEMA_MISMATCH"
 NO_RECORDS = "NO_RECORDS"
+NO_DATA = "NO_DATA"
+NO_DATA_FOR_COUNTRY_INDICATOR = "NO_DATA_FOR_COUNTRY_INDICATOR"
+INVALID_REQUEST = "INVALID_REQUEST"
+ENDPOINT_OR_INDICATOR_NOT_FOUND = "ENDPOINT_OR_INDICATOR_NOT_FOUND"
+SOURCE_TEMPORARY_FAILURE = "SOURCE_TEMPORARY_FAILURE"
 RATE_LIMITED = "RATE_LIMITED"
 NETWORK_ERROR = "NETWORK_ERROR"
 TIMEOUT = "TIMEOUT"
@@ -158,7 +163,8 @@ def validate_response(
         size_bytes=len(body), preview=body[:300].decode("utf-8", errors="replace"),
     )
 
-    # 1. HTTP status
+    # 1. HTTP status (granular — a 200 + zero records is never the same as a
+    #    404 or a 500, and none of them is a retrieval success).
     if http_status in (401, 403):
         result.status = AUTH_FAILED
         result.message = f"HTTP {http_status} authentication failed"
@@ -167,9 +173,17 @@ def validate_response(
         result.status = RATE_LIMITED
         result.message = "HTTP 429 rate limited"
         return result
+    if http_status == 400:
+        result.status = INVALID_REQUEST
+        result.message = "HTTP 400 invalid request"
+        return result
+    if http_status == 404:
+        result.status = ENDPOINT_OR_INDICATOR_NOT_FOUND
+        result.message = "HTTP 404 endpoint or indicator not found"
+        return result
     if http_status >= 500:
-        result.status = NETWORK_ERROR
-        result.message = f"HTTP {http_status} server error"
+        result.status = SOURCE_TEMPORARY_FAILURE
+        result.message = f"HTTP {http_status} source temporary failure"
         return result
     if http_status != 200:
         result.status = NON_DATA_RESPONSE
@@ -278,5 +292,7 @@ __all__ = [
     "ValidationResult", "validate_response", "is_html", "looks_like_portal",
     "OK", "AUTH_FAILED", "PORTAL_HTML", "NON_DATA_RESPONSE", "INVALID_XML",
     "INVALID_JSON", "INVALID_CSV", "EMPTY_RESPONSE", "SCHEMA_MISMATCH",
-    "NO_RECORDS", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT",
+    "NO_RECORDS", "NO_DATA", "NO_DATA_FOR_COUNTRY_INDICATOR", "INVALID_REQUEST",
+    "ENDPOINT_OR_INDICATOR_NOT_FOUND", "SOURCE_TEMPORARY_FAILURE",
+    "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT",
 ]

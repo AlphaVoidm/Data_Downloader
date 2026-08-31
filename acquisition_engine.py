@@ -106,6 +106,9 @@ class AcquiredFeature:
     verification_notes: list[str] = field(default_factory=list)
     failure_reason: str = ""
     attempts: list[dict[str, Any]] = field(default_factory=list)
+    http_attempts: list[dict[str, Any]] = field(default_factory=list)
+    http_status: int | None = None
+    response_type: str = ""
     retrieved_at: str = field(default_factory=now_utc)
 
     def to_dict(self) -> dict[str, Any]:
@@ -135,6 +138,20 @@ def _connector_failure_status(verification: EndpointVerification) -> str:
         return "SCHEMA_MISMATCH"
     if s == "NO_RECORDS":
         return "NO_RECORDS"
+    if s == "NO_DATA":
+        return "NO_DATA"
+    if s == "NO_DATA_FOR_COUNTRY_INDICATOR":
+        return "NO_DATA_FOR_COUNTRY_INDICATOR"
+    if s == "INVALID_REQUEST":
+        return "INVALID_REQUEST"
+    if s == "ENDPOINT_OR_INDICATOR_NOT_FOUND":
+        return "ENDPOINT_OR_INDICATOR_NOT_FOUND"
+    if s == "SOURCE_TEMPORARY_FAILURE":
+        return "SOURCE_TEMPORARY_FAILURE"
+    if s == "RETRY_EXHAUSTED":
+        return "RETRY_EXHAUSTED"
+    if s == "CONFIGURATION_ERROR":
+        return "CONFIGURATION_ERROR"
     if s == "BULK_MANUAL":
         return "BULK_MANUAL"
     if s == "DEPENDENCY_MISSING":
@@ -207,6 +224,7 @@ def acquire_feature(
             "verification": verification.status,
             "verification_note": verification.message,
             "source_status": source_status(verification.status),
+            "http_attempts": list(verification.attempts),
         })
 
         if verification.status == VERIFIED:
@@ -227,14 +245,21 @@ def acquire_feature(
                     ("post-validation PASS: " if valid else "post-validation FAIL: ") + "; ".join(validation_notes)
                 ]
                 base.failure_reason = outcome.failure_reason
+                base.http_attempts = list(outcome.attempts)
+                base.http_status = outcome.http_status
+                base.response_type = outcome.response_type
                 base.attempts[-1]["source_status"] = source_status(outcome.status)
                 return base
             # Verified endpoint but non-successful outcome (e.g. BULK_MANUAL,
-            # NO_RECORDS, SCHEMA_MISMATCH) -> fall through to the next source.
+            # NO_RECORDS, SCHEMA_MISMATCH, NO_DATA) -> fall through.
             base.attempts[-1]["failure_reason"] = outcome.status
             base.attempts[-1]["verification"] = verification.status
             base.attempts[-1]["source_status"] = source_status(outcome.status)
             base.attempts[-1]["note"] = outcome.message
+            base.attempts[-1]["http_attempts"] = list(outcome.attempts)
+            base.http_attempts = list(outcome.attempts)
+            base.http_status = outcome.http_status
+            base.response_type = outcome.response_type
             continue
 
         # Verification failed for this source -> record and try the next.

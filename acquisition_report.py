@@ -26,8 +26,23 @@ def _attempts_summary(r: Any) -> str:
     parts = []
     for a in r.attempts:
         status = a.get("source_status") or a.get("failure_reason") or a.get("verification") or "?"
-        parts.append(f"{a.get('source', '?')}={status}")
+        http = a.get("http_attempts") or []
+        detail = f"{a.get('source', '?')}={status}"
+        if http:
+            http_summary = ",".join(
+                str(h.get("http_status") or h.get("error") or "?") for h in http
+            )
+            detail += f"[http:{http_summary}]"
+        parts.append(detail)
     return " -> ".join(parts)
+
+
+def _http_attempts_summary(r: Any) -> str:
+    """Compact HTTP retry history (statuses/errors in order)."""
+    http = getattr(r, "http_attempts", None) or []
+    if not http:
+        return ""
+    return ",".join(str(h.get("http_status") or h.get("error") or "?") for h in http)
 
 
 def _sha256(path: str) -> str:
@@ -65,6 +80,9 @@ def build_report_b(results: list[Any]) -> pd.DataFrame:
             "verification_status": r.verification_status,
             "verification_notes": " | ".join(r.verification_notes),
             "attempts": _attempts_summary(r),
+            "http_attempts": _http_attempts_summary(r),
+            "http_status": r.http_status if getattr(r, "http_status", None) is not None else "",
+            "response_type": getattr(r, "response_type", ""),
             "failure_reason": r.failure_reason,
             "retrieval_timestamp_utc": r.retrieved_at,
             "checksum_sha256": _sha256(r.path),

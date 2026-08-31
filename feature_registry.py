@@ -25,17 +25,20 @@ ROLE_TARGET = "TARGET"
 ROLE_CORE_EXOGENOUS = "CORE_EXOGENOUS"
 ROLE_EXTENDED_EXOGENOUS = "EXTENDED_EXOGENOUS"
 ROLE_OPTIONAL_EXOGENOUS = "OPTIONAL_EXOGENOUS"
+ROLE_EXCLUDED_EXOGENOUS = "EXCLUDED_EXOGENOUS"
 
 TIER_TARGET = "target"
 TIER_CORE = "core"
 TIER_EXTENDED = "extended"
 TIER_OPTIONAL = "optional"
+TIER_EXCLUDED = "excluded"
 
 _ROLE_TO_TIER = {
     ROLE_TARGET: TIER_TARGET,
     ROLE_CORE_EXOGENOUS: TIER_CORE,
     ROLE_EXTENDED_EXOGENOUS: TIER_EXTENDED,
     ROLE_OPTIONAL_EXOGENOUS: TIER_OPTIONAL,
+    ROLE_EXCLUDED_EXOGENOUS: TIER_EXCLUDED,
 }
 
 # Human-friendly aliases -> canonical concept. Used by the CLI / acquisition
@@ -144,6 +147,10 @@ class FeatureSpec:
         return self.role == ROLE_OPTIONAL_EXOGENOUS
 
     @property
+    def is_excluded(self) -> bool:
+        return self.role == ROLE_EXCLUDED_EXOGENOUS
+
+    @property
     def is_derived(self) -> bool:
         return bool(self.derived_from)
 
@@ -196,6 +203,8 @@ def _load() -> dict[str, FeatureSpec]:
         _add(ROLE_EXTENDED_EXOGENOUS, item)
     for item in cfg.get("optional_exogenous", []):
         _add(ROLE_OPTIONAL_EXOGENOUS, item)
+    for item in cfg.get("excluded_exogenous", []):
+        _add(ROLE_EXCLUDED_EXOGENOUS, item)
     return registry
 
 
@@ -293,6 +302,16 @@ def get_optional_features() -> list[FeatureSpec]:
     )
 
 
+def get_excluded_features() -> list[FeatureSpec]:
+    """Features excluded from the core historical pipeline (e.g. AC/heat-pump
+    penetration — no global open source). Registered for documentation only;
+    they never gate a country."""
+    return sorted(
+        [f for f in FEATURE_REGISTRY.values() if f.role == ROLE_EXCLUDED_EXOGENOUS],
+        key=lambda f: f.concept,
+    )
+
+
 def get_features_by_tier(tier: str) -> list[FeatureSpec]:
     return sorted(
         [f for f in FEATURE_REGISTRY.values() if f.tier == tier],
@@ -307,10 +326,10 @@ def get_all_features() -> list[FeatureSpec]:
 __all__ = [
     "FeatureSpec", "FEATURE_REGISTRY", "FEATURE_ALIASES", "get_feature",
     "get_target_feature", "get_core_features", "get_core_exogenous",
-    "get_extended_features", "get_optional_features", "get_features_by_tier",
-    "get_all_features", "resolve_feature_concept", "format_feature_not_found",
-    "list_feature_concepts", "FeatureNotFoundError",
+    "get_extended_features", "get_optional_features", "get_excluded_features",
+    "get_features_by_tier", "get_all_features", "resolve_feature_concept",
+    "format_feature_not_found", "list_feature_concepts", "FeatureNotFoundError",
     "ROLE_TARGET", "ROLE_CORE_EXOGENOUS", "ROLE_EXTENDED_EXOGENOUS",
-    "ROLE_OPTIONAL_EXOGENOUS", "TIER_TARGET", "TIER_CORE", "TIER_EXTENDED",
-    "TIER_OPTIONAL",
+    "ROLE_OPTIONAL_EXOGENOUS", "ROLE_EXCLUDED_EXOGENOUS",
+    "TIER_TARGET", "TIER_CORE", "TIER_EXTENDED", "TIER_OPTIONAL", "TIER_EXCLUDED",
 ]

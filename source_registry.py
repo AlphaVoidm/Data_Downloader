@@ -50,6 +50,8 @@ class SourceDefinition:
     api_available: bool
     notes: str = ""
     aliases: tuple[str, ...] = field(default_factory=tuple)
+    acquisition_mode: str = "api_country_query"
+    role: str = "primary"
 
     # Legacy-compatible accessors (used by pipeline.py / provenance.py)
     @property
@@ -117,6 +119,8 @@ def load_source_registry() -> dict[str, SourceDefinition]:
             academic_relevance=item.get("academic_relevance", ""),
             public_access=item.get("public_access", ""),
             api_available=bool(item.get("api_available", False)),
+            acquisition_mode=item.get("acquisition_mode", "api_country_query"),
+            role=item.get("role", "primary"),
             notes=item.get("notes", ""),
             aliases=tuple(item.get("aliases", [])),
         )
@@ -172,6 +176,49 @@ def get_all_registered_sources() -> list[SourceDefinition]:
     return list(SOURCE_REGISTRY.values())
 
 
+# --- Acquisition modes (the three-way source execution model) -----------------
+MODE_API_COUNTRY_QUERY = "api_country_query"
+MODE_BULK_JOB = "bulk_job"
+MODE_RESTRICTED = "restricted"
+
+ACQUISITION_MODES: dict[str, str] = {
+    MODE_API_COUNTRY_QUERY: "Query country directly",
+    MODE_BULK_JOB: "Submit targeted job/request; download only the extracted result",
+    MODE_RESTRICTED: "Report honestly; do not attempt",
+}
+
+
+def get_source_capability_matrix() -> list[dict[str, str]]:
+    """The Source Capability Matrix: how each source is supposed to be acquired.
+
+    Columns: source, features, coverage, temporal resolution, spatial
+    resolution, authentication, acquisition mode, historical coverage,
+    fallback priority, rate limit, expected response, role.
+    """
+    rows: list[dict[str, str]] = []
+    for s in sorted(SOURCE_REGISTRY.values(), key=lambda x: x.source_id):
+        rows.append({
+            "source_id": s.source_id,
+            "source": s.source_name,
+            "features": ";".join(s.features) or "(none — scenario only)",
+            "country_coverage": s.coverage_scope,
+            "temporal_resolution": ";".join(s.frequencies),
+            "spatial_resolution": s.coverage_discovery,
+            "authentication": s.auth_type,
+            "acquisition_mode": s.acquisition_mode,
+            "mode_label": ACQUISITION_MODES.get(s.acquisition_mode, s.acquisition_mode),
+            "historical_coverage": f"{s.historical_start}–{s.historical_end}",
+            "role": s.role,
+            "rate_limit": s.rate_limit,
+            "expected_response": s.access_method,
+        })
+    return rows
+
+
+def get_sources_by_mode(mode: str) -> list[SourceDefinition]:
+    return [s for s in SOURCE_REGISTRY.values() if s.acquisition_mode == mode]
+
+
 def get_sources_for_feature(concept: str) -> list[SourceDefinition]:
     concept_norm = concept.strip().lower()
     return [s for s in SOURCE_REGISTRY.values() if concept_norm in s.features]
@@ -185,4 +232,7 @@ def credential_env_for(source_id: str) -> str:
 __all__ = [
     "SourceDefinition", "SOURCE_REGISTRY", "get_source", "get_source_metadata",
     "get_all_registered_sources", "get_sources_for_feature", "credential_env_for",
+    "get_source_capability_matrix", "get_sources_by_mode",
+    "MODE_API_COUNTRY_QUERY", "MODE_BULK_JOB", "MODE_RESTRICTED",
+    "ACQUISITION_MODES",
 ]

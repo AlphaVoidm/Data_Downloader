@@ -91,15 +91,16 @@ def verify_eia(country: str, key: str | None) -> EndpointVerification:
             source_id="eia", country=country, feature="electricity_demand",
             status=AUTH_FAILED, message=f"{KEY_ENV} not configured",
         )
+    history: list[dict[str, Any]] = []
     try:
-        resp = _HTTP.get(ENDPOINT, params=_sample_request(key, DEFAULT_RESPONDENT), timeout=30)
+        resp = _HTTP.get(ENDPOINT, params=_sample_request(key, DEFAULT_RESPONDENT), timeout=30, history=history)
     except ConnectorError as exc:
         return EndpointVerification(
             source_id="eia", country=country, feature="electricity_demand",
-            status=str(exc), message=str(exc),
+            status=exc.status, message=str(exc), attempts=exc.attempts or history,
         )
     result = validate_response(resp, expected_format="json", required_columns=REQUIRED_COLUMNS)
-    return verification_from_result(result, "eia", country, "electricity_demand")
+    return verification_from_result(result, "eia", country, "electricity_demand", attempts=history)
 
 
 def acquire_eia(country: str, start_year: int, end_year: int, key: str | None, out_dir: Path) -> AcquisitionOutcome:
