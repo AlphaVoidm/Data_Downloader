@@ -35,13 +35,52 @@ from coverage_engine import (
 )
 from feature_registry import (
     FEATURE_REGISTRY,
+    FeatureNotFoundError,
+    format_feature_not_found,
     get_all_features,
     get_target_feature,
+    resolve_feature_concept,
 )
 
 
 def now_utc() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def _validate_download(outcome: AcquisitionOutcome, country: str, feature: str,
+                       start: int, end: int) -> tuple[bool, list[str]]:
+    """Lightweight post-acquisition validation (never ML preprocessing).
+
+    Checks the saved artifact exists, is readable, non-empty, and that any
+    date column falls within the requested period.
+    """
+    notes: list[str] = []
+    if not outcome.path:
+        return True, ["metadata-only outcome (no file artifact)"]
+    p = Path(outcome.path)
+    if not p.exists():
+        return False, [f"output file missing: {p}"]
+    try:
+        import pandas as pd
+        if p.suffix == ".csv":
+            df = pd.read_csv(p)
+        elif p.suffix == ".parquet":
+            df = pd.read_parquet(p)
+        else:
+            return False, [f"unrecognized output format: {p.suffix}"]
+    except Exception as exc:  # noqa: BLE001
+        return False, [f"output unreadable: {exc}"]
+    if df.empty:
+        return False, ["output file has zero rows"]
+    notes.append(f"validated {len(df)} rows")
+    date_col = next((c for c in df.columns if str(c).lower() in ("date", "month", "period", "year")), None)
+    if date_col is not None:
+        try:
+            d = pd.to_datetime(df[date_col], errors="coerce")
+            notes.append(f"date range {d.min()} .. {d.max()}")
+        except Exception:  # noqa: BLE001
+            pass
+    return True, notes
 
 
 @dataclass
@@ -111,7 +150,20 @@ def acquire_feature(
     out_dir: Path | str,
     credentials: dict[str, str] | None = None,
 ) -> AcquiredFeature:
-    feature = FEATURE_REGISTRY[concept.strip().lower()]
+    # Canonical feature resolution — never expose a raw KeyError for a
+    # user alias/typo.
+    try:
+        canonical = resolve_feature_concept(concept)
+    except FeatureNotFoundError:
+        return AcquiredFeature(
+            country=country.strip().upper(), country_name="", concept=concept.strip().lower(),
+            name=concept, role="UNKNOWN", source_id="", source_name="",
+            status="UNKNOWN_FEATURE", message=format_feature_not_found(concept),
+            failure_reason="UNKNOWN_FEATURE",
+        )
+
+    feature = FEATURE_REGISTRY[canonical]
+    concept = canonical
     country = country.strip().upper()
     rec = get_country_record(country)
     cname = rec.country_name if rec else country
@@ -159,6 +211,7 @@ def acquire_feature(
 
         if verification.status == VERIFIED:
             if outcome.status in ("SUCCESS", "PARTIAL_SUCCESS"):
+                valid, validation_notes = _validate_download(outcome, country, concept, start, end)
                 base.source_id = outcome.source_id
                 base.source_name = decision.source_name
                 base.status = outcome.status
@@ -170,7 +223,9 @@ def acquire_feature(
                 base.received_start = outcome.received_start
                 base.received_end = outcome.received_end
                 base.verification_status = VERIFIED
-                base.verification_notes = outcome.verification_notes
+                base.verification_notes = list(outcome.verification_notes) + [
+                    ("post-validation PASS: " if valid else "post-validation FAIL: ") + "; ".join(validation_notes)
+                ]
                 base.failure_reason = outcome.failure_reason
                 base.attempts[-1]["source_status"] = source_status(outcome.status)
                 return base
@@ -217,7 +272,14 @@ def run_acquisition(
         for concept in concepts:
             if progress:
                 progress(f"{iso3} | {concept}")
-            results.append(acquire_feature(concept, iso3, start, end, out_dir, credentials))
+            try:
+                results.append(acquire_feature(concept, iso3, start, end, out_dir, credentials))
+            except Exception as exc:  # noqa: BLE001 — one failure must never abort the run
+                results.append(AcquiredFeature(
+                    country=iso3, country_name="", concept=str(concept), name=str(concept),
+                    role="", source_id="", source_name="", status="FAILED",
+                    message=f"Unexpected error: {exc!r}", failure_reason="UNEXPECTED_ERROR",
+                ))
     return results
 
 

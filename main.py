@@ -3,8 +3,9 @@
 Subcommands
 -----------
     audit      Discovery-only: country × feature × source matrix + HGT-QF readiness.
+    plan       Dry-run source resolution (no downloads): selected source + fallbacks.
     acquire    Coverage-gated acquisition (endpoint verification + fallback).
-    run        audit -> acquire for CORE_READY/MONTHLY_SUFFICIENT countries.
+    run        audit -> acquire for target-ready countries.
     countries  List registered countries.
     sources    List registered sources.
     rebuild-country-registry   Regenerate config/country_registry.csv.
@@ -60,6 +61,57 @@ def _credentials() -> dict[str, str]:
     return creds
 
 
+def _resolve_features(raw: list[str] | None) -> tuple[list[str], list[str]]:
+    """Resolve feature aliases/typos to canonical concepts; report unknowns."""
+    from feature_registry import FeatureNotFoundError, format_feature_not_found, resolve_feature_concept
+    if not raw:
+        return [], []
+    resolved: list[str] = []
+    errors: list[str] = []
+    for f in raw:
+        try:
+            canon = resolve_feature_concept(f)
+            if canon not in resolved:
+                resolved.append(canon)
+        except FeatureNotFoundError:
+            errors.append(format_feature_not_found(f))
+    return resolved, errors
+
+
+_SUMMARY_BUCKETS: dict[str, list[str]] = {
+    "SUCCESS": ["SUCCESS", "PARTIAL_SUCCESS"],
+    "FAILED": ["NETWORK_ERROR", "NOT_VERIFIED", "DOWNLOAD_ERROR", "VERIFY_FAILED",
+               "SCHEMA_MISMATCH", "PARSE_ERROR", "INVALID_RESPONSE", "NO_RECORDS",
+               "DEPENDENCY_MISSING", "UNEXPECTED_ERROR", "FAILED", "RATE_LIMITED",
+               "TIMEOUT", "SOURCE_FORMAT_ERROR", "SOURCE_API_ERROR", "SOURCE_DATA_EMPTY"],
+    "SKIPPED": ["SKIPPED", "MAPPING_REQUIRED", "BULK_MANUAL",
+                "TEMPORARILY_UNAVAILABLE", "SOURCE_TEMPORARILY_UNAVAILABLE"],
+    "UNSUPPORTED": ["NOT_SUPPORTED", "UNKNOWN_FEATURE", "UNKNOWN",
+                    "SOURCE_NOT_COVERED"],
+    "AUTH_REQUIRED": ["AUTH_REQUIRED", "AUTH_FAILED", "SOURCE_AUTH_REQUIRED"],
+}
+
+
+def _print_acquisition_summary(results: list[Any]) -> None:
+    from collections import Counter
+    granular = Counter(r.status for r in results)
+    buckets = Counter()
+    for status, n in granular.items():
+        bucket = next((b for b, codes in _SUMMARY_BUCKETS.items() if status in codes), "FAILED")
+        buckets[bucket] += n
+    print("\nAcquisition summary:")
+    for bucket in ("SUCCESS", "FAILED", "SKIPPED", "UNSUPPORTED", "AUTH_REQUIRED"):
+        print(f"  {bucket:<12} {buckets.get(bucket, 0)}")
+    print("  (detail)      " + "  ".join(
+        f"{s}={n}" for s, n in sorted(granular.items(), key=lambda kv: -kv[1])))
+
+
+def _report_acquisition_error(feature_errors: list[str]) -> None:
+    for msg in feature_errors:
+        print("\n" + msg, file=sys.stderr)
+    print("\nNo acquisition performed (feature resolution failed).", file=sys.stderr)
+
+
 def _add_common_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--countries", nargs="*", default=None,
                         help="Country names/ISO-3 codes or presets (e.g. G7). Default: all registered countries.")
@@ -113,16 +165,48 @@ def cmd_acquire(args: argparse.Namespace) -> int:
         print("No valid countries supplied.", file=sys.stderr)
         return 2
 
+    resolved, feature_errors = _resolve_features(args.features)
+    if feature_errors:
+        _report_acquisition_error(feature_errors)
+        return 2
+
     results = run_acquisition(
         countries=countries, start=args.start, end=args.end, out_dir=args.output,
-        credentials=_credentials(), concepts=args.features,
+        credentials=_credentials(), concepts=resolved or None,
         progress=lambda msg: print(f"  … {msg}", flush=True),
     )
     generate_acquisition_report(args.output, results)
 
     ok = sum(1 for r in results if r.status in ("SUCCESS", "PARTIAL_SUCCESS"))
     print(f"\nAcquisition complete: {ok}/{len(results)} country-features acquired.")
+    _print_acquisition_summary(results)
     print(f"Report B: {args.output}/metadata/report_B_acquisition.csv")
+    return 0
+
+
+def cmd_plan(args: argparse.Namespace) -> int:
+    from acquisition_plan import build_acquisition_plan, render_acquisition_plan
+
+    countries = _parse_countries(args.countries)
+    if not countries:
+        print("No valid countries supplied.", file=sys.stderr)
+        return 2
+
+    resolved, feature_errors = _resolve_features(args.features)
+    if feature_errors:
+        _report_acquisition_error(feature_errors)
+        return 2
+
+    plan = build_acquisition_plan(
+        countries=countries, features=resolved, start_year=args.start,
+        end_year=args.end, credentials=_credentials(),
+    )
+    print(render_acquisition_plan(plan))
+    if args.output:
+        meta = Path(args.output) / "metadata"
+        meta.mkdir(parents=True, exist_ok=True)
+        plan.to_csv(meta / "acquisition_plan.csv", index=False)
+        print(f"\nPlan written to {args.output}/metadata/acquisition_plan.csv")
     return 0
 
 
@@ -142,16 +226,23 @@ def cmd_run(args: argparse.Namespace) -> int:
     print(render_audit_report(audit))
 
     report_c = build_report_c(countries, args.start, args.end, _credentials(), cfg)
-    eligible = report_c[report_c["research_ready"] == "RESEARCH_READY"]["iso3"].tolist()
+
+    # Acquisition eligibility is driven by TARGET readiness (monthly demand),
+    # NOT by full RESEARCH_READY. Optional/extended gaps never block useful
+    # data. `--research-ready` tightens to the full research rule.
+    eligible_df = report_c[report_c["target_status"].isin(("MONTHLY_SUFFICIENT", "MONTHLY_PARTIAL"))]
+    if getattr(args, "research_ready", False):
+        eligible_df = eligible_df[eligible_df["research_ready"] == "RESEARCH_READY"]
+    eligible = eligible_df["iso3"].tolist()
 
     if args.limit:
         eligible = eligible[: args.limit]
 
     if not eligible:
-        print("\nNo RESEARCH_READY countries found; skipping acquisition.")
+        print("\nNo TARGET_READY countries found; skipping acquisition.")
         return 0
 
-    print(f"\nAcquiring {len(eligible)} RESEARCH_READY countries: {', '.join(eligible)}\n")
+    print(f"\nAcquiring {len(eligible)} target-ready countries: {', '.join(eligible)}\n")
     results = run_acquisition(
         countries=eligible, start=args.start, end=args.end, out_dir=args.output,
         credentials=_credentials(), progress=lambda m: print(f"  … {m}", flush=True),
@@ -159,6 +250,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     generate_acquisition_report(args.output, results)
     ok = sum(1 for r in results if r.status in ("SUCCESS", "PARTIAL_SUCCESS"))
     print(f"\nAcquisition complete: {ok}/{len(results)} country-features acquired.")
+    _print_acquisition_summary(results)
     return 0
 
 
@@ -199,14 +291,22 @@ def build_parser() -> argparse.ArgumentParser:
     p_acquire = sub.add_parser("acquire", help="Coverage-gated acquisition")
     _add_common_args(p_acquire)
     p_acquire.add_argument("--features", nargs="*", default=None,
-                           help="Optional feature concepts (e.g. electricity_demand temperature_2m)")
+                           help="Optional feature concepts/aliases (e.g. electricity_demand temperature_2m wind)")
     p_acquire.set_defaults(func=cmd_acquire)
 
-    p_run = sub.add_parser("run", help="audit -> acquire for eligible countries")
+    p_plan = sub.add_parser("plan", help="Dry-run source resolution (no downloads)")
+    _add_common_args(p_plan)
+    p_plan.add_argument("--features", nargs="*", default=None,
+                        help="Feature concepts/aliases (e.g. electricity_demand temperature_2m wind)")
+    p_plan.set_defaults(func=cmd_plan)
+
+    p_run = sub.add_parser("run", help="audit -> acquire for target-ready countries")
     _add_common_args(p_run)
     _add_research_args(p_run)
     p_run.add_argument("--max-per-region", type=int, default=6)
     p_run.add_argument("--limit", type=int, default=None, help="Cap the number of countries acquired")
+    p_run.add_argument("--research-ready", action="store_true",
+                       help="Restrict acquisition to RESEARCH_READY countries (default: TARGET_READY)")
     p_run.set_defaults(func=cmd_run)
 
     sub.add_parser("countries", help="List registered countries").set_defaults(func=cmd_countries)

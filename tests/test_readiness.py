@@ -33,9 +33,9 @@ class TargetReadinessTest(unittest.TestCase):
 class FeatureCoverageTest(unittest.TestCase):
     def test_egypt_core_coverage(self):
         c = evaluate_feature_coverage("EGY", 2000, 2024, {"EMBER_API_KEY": "x", "CDS_API_KEY": "x"})
-        self.assertEqual(c["core"]["total"], 14)
-        self.assertEqual(c["core_coverage"], "14/14")
-        self.assertEqual(c["extended_coverage"], "5/5")
+        self.assertEqual(c["core"]["total"], 13)
+        self.assertEqual(c["core_coverage"], "13/13")
+        self.assertEqual(c["extended_coverage"], "6/6")
 
     def test_optional_not_required(self):
         # Optional coverage varies but never gates readiness.

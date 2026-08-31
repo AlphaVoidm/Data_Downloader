@@ -22,6 +22,7 @@ from .base import (
     AUTH_FAILED,
     EndpointVerification,
     AcquisitionOutcome,
+    acquisition_status_for_verification,
 )
 
 ERA5_DATASET = "reanalysis-era5-single-levels-monthly-means"
@@ -204,7 +205,7 @@ def acquire_era5(country: str, feature: str, start_year: int, end_year: int, cre
 def era5_connector(country: str, feature: str, start: int, end: int, credentials: dict[str, str] | None, out_dir: Path, **_: Any):
     verification = verify_era5(country, credentials)
     if verification.status != "VERIFIED":
-        status = verification.status if verification.status in ("AUTH_FAILED", "DEPENDENCY_MISSING", "MAPPING_REQUIRED") else "NOT_VERIFIED"
+        status = acquisition_status_for_verification(verification.status)
         return verification, AcquisitionOutcome(
             source_id="era5", country=country, feature=feature, status=status,
             message=verification.message, failure_reason=verification.status,

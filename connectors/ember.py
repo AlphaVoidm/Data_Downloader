@@ -35,6 +35,7 @@ from .base import (
     ConnectorError,
     _HTTP,
     get_credential,
+    acquisition_status_for_verification,
     outcome_from_result,
     verification_from_result,
 )
@@ -265,8 +266,7 @@ def ember_connector(
     key = get_credential(credentials, KEY_ENV)
     verification = verify_ember(country, feature, key)
     if verification.status != "VERIFIED":
-        status = verification.status if verification.status in (
-            "AUTH_FAILED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT", "NO_RECORDS") else "NOT_VERIFIED"
+        status = acquisition_status_for_verification(verification.status)
         return verification, AcquisitionOutcome(
             source_id="ember", country=country, feature=feature, status=status,
             message=verification.message, failure_reason=verification.status,

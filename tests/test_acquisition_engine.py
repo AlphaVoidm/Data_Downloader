@@ -3,8 +3,9 @@ import tempfile
 import unittest
 from unittest import mock
 
+import acquisition_engine
 from connectors.base import AcquisitionOutcome, EndpointVerification, SUCCESS, VERIFIED
-from acquisition_engine import acquire_feature
+from acquisition_engine import AcquiredFeature, acquire_feature, run_acquisition
 
 
 def _ok_connector(country, feature, start, end, credentials, out_dir, **kw):
@@ -69,6 +70,54 @@ class AcquireFeatureTest(unittest.TestCase):
             result = acquire_feature("electricity_demand", "DEU", 2000, 2024, tempfile.mkdtemp(),
                                      credentials={"ENTSOE_API_TOKEN": "x"})
             self.assertEqual(result.status, "NON_DATA_RESPONSE")
+
+    def test_run_does_not_abort_on_item_failure(self):
+        # One country x feature blowing up must never terminate the run; the
+        # other items still process and the failure is captured with a reason.
+        real = acquisition_engine.acquire_feature
+
+        def flaky(concept, country, start, end, out_dir, credentials=None):
+            if concept == "temperature_2m" and country == "EGY":
+                raise RuntimeError("kaboom")
+            return real(concept, country, start, end, out_dir, credentials)
+
+        with mock.patch("acquisition_engine.acquire_feature", side_effect=flaky):
+            results = run_acquisition(
+                ["EGY", "DEU"], 2000, 2024, tempfile.mkdtemp(),
+                concepts=["electricity_demand", "temperature_2m"],
+            )
+
+        self.assertEqual(len(results), 4)
+        failed = [r for r in results if r.status == "FAILED"]
+        self.assertEqual(len(failed), 1)
+        self.assertEqual(failed[0].concept, "temperature_2m")
+        self.assertEqual(failed[0].failure_reason, "UNEXPECTED_ERROR")
+        # The other three items were still processed and recorded.
+        self.assertEqual(len([r for r in results if r.concept == "electricity_demand"]), 2)
+        self.assertEqual(len([r for r in results if r.concept == "temperature_2m"]), 2)
+
+    def test_report_b_records_required_metadata(self):
+        from acquisition_report import build_report_b
+
+        r = AcquiredFeature(
+            country="EGY", country_name="Egypt", concept="electricity_demand",
+            name="Electricity demand", role="target", source_id="ember",
+            source_name="Ember", status="AUTH_REQUIRED", message="missing key",
+            requested_start="2000-01", requested_end="2024-12",
+            failure_reason="AUTH_REQUIRED",
+        )
+        df = build_report_b([r])
+        for col in ("country", "iso3", "feature", "source", "requested_period",
+                    "received_period", "frequency", "units", "records", "status",
+                    "source_status", "failure_reason", "attempts",
+                    "retrieval_timestamp_utc"):
+            self.assertIn(col, df.columns)
+        row = df.iloc[0]
+        self.assertEqual(row["iso3"], "EGY")
+        self.assertEqual(row["feature"], "electricity_demand")
+        self.assertEqual(row["status"], "AUTH_REQUIRED")
+        self.assertEqual(row["failure_reason"], "AUTH_REQUIRED")
+        self.assertEqual(row["requested_period"], "2000-01 / 2024-12")
 
 
 if __name__ == "__main__":

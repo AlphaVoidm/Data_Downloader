@@ -20,6 +20,7 @@ from .base import (
     ConnectorError,
     _HTTP,
     get_credential,
+    acquisition_status_for_verification,
     outcome_from_result,
     verification_from_result,
 )
@@ -180,7 +181,7 @@ def eia_connector(country: str, feature: str, start: int, end: int, credentials:
     key = get_credential(credentials, KEY_ENV)
     verification = verify_eia(country, key)
     if verification.status != "VERIFIED":
-        status = verification.status if verification.status in ("AUTH_FAILED", "NOT_SUPPORTED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT") else "NOT_VERIFIED"
+        status = acquisition_status_for_verification(verification.status)
         return verification, AcquisitionOutcome(
             source_id="eia", country=country, feature=feature, status=status,
             message=verification.message, failure_reason=verification.status,

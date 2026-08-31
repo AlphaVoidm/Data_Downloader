@@ -38,11 +38,11 @@ class FeatureRegistryTest(unittest.TestCase):
         self.assertTrue(target.is_target)
 
     def test_core_count(self):
-        # 1 target + 14 core explanatory
-        self.assertEqual(len(get_core_features()), 15)
+        # 1 target + 13 core explanatory
+        self.assertEqual(len(get_core_features()), 14)
 
     def test_extended_count(self):
-        self.assertEqual(len(get_extended_features()), 5)
+        self.assertEqual(len(get_extended_features()), 6)
 
     def test_optional_count(self):
         self.assertEqual(len(get_optional_features()), 5)
@@ -63,6 +63,28 @@ class FeatureRegistryTest(unittest.TestCase):
     def test_gbr_override(self):
         demand = get_target_feature()
         self.assertEqual(demand.ordered_sources("GBR")[0], "neso")
+
+    def test_feature_aliases_resolve(self):
+        from feature_registry import resolve_feature_concept
+        self.assertEqual(resolve_feature_concept("wind"), "wind_speed_10m")
+        self.assertEqual(resolve_feature_concept("wind_speed"), "wind_speed_10m")
+        self.assertEqual(resolve_feature_concept("temperature"), "temperature_2m")
+        self.assertEqual(resolve_feature_concept("temp"), "temperature_2m")
+        self.assertEqual(resolve_feature_concept("solar"), "solar_radiation")
+        self.assertEqual(resolve_feature_concept("demand"), "electricity_demand")
+
+    def test_unknown_feature_helpful_error(self):
+        from feature_registry import (
+            FeatureNotFoundError,
+            format_feature_not_found,
+            resolve_feature_concept,
+        )
+        with self.assertRaises(FeatureNotFoundError):
+            resolve_feature_concept("temprature")
+        msg = format_feature_not_found("temprature")
+        self.assertIn("Did you mean", msg)
+        self.assertIn("temperature_2m", msg)
+        self.assertIn("Available features", msg)
 
 
 class SourceRegistryTest(unittest.TestCase):

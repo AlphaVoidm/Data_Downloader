@@ -26,6 +26,7 @@ from .base import (
     ConnectorError,
     _HTTP,
     get_credential,
+    acquisition_status_for_verification,
     outcome_from_result,
     verification_from_result,
 )
@@ -184,8 +185,7 @@ def entsoe_connector(
     if verification.status != "VERIFIED":
         return verification, AcquisitionOutcome(
             source_id="entsoe", country=country, feature=feature,
-            status=verification.status if verification.status in (
-                "AUTH_FAILED", "MAPPING_REQUIRED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT") else "NOT_VERIFIED",
+            status=acquisition_status_for_verification(verification.status),
             message=verification.message, failure_reason=verification.status,
         )
     outcome = acquire_entsoe(country, start, end, token, out_dir)

@@ -141,6 +141,15 @@ class DemandClassificationTest(unittest.TestCase):
         self.assertEqual(d["status"], MONTHLY_SUFFICIENT)
         self.assertEqual(d["best_monthly_source"], "Ember")
 
+    def test_generation_stays_annual_for_monthly_limited_country(self):
+        # Botswana is not in Ember's monthly geography set: generation must
+        # stay ANNUAL even with credentials — never synthesized to monthly.
+        p = resolve_feature("total_electricity_generation", "BWA", 2000, 2024,
+                            {"EMBER_API_KEY": "x"})
+        self.assertEqual(p.best_status, SUPPORTED)
+        self.assertIn(p.best_frequency, ("annual", "yearly"))
+        self.assertNotEqual(p.best_frequency, "monthly")
+
 
 if __name__ == "__main__":
     unittest.main()

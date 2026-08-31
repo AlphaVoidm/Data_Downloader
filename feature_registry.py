@@ -38,6 +38,74 @@ _ROLE_TO_TIER = {
     ROLE_OPTIONAL_EXOGENOUS: TIER_OPTIONAL,
 }
 
+# Human-friendly aliases -> canonical concept. Used by the CLI / acquisition
+# engine so a user typo/alias never crashes the run with a raw KeyError.
+FEATURE_ALIASES: dict[str, str] = {
+    # demand
+    "demand": "electricity_demand",
+    "electricity": "electricity_demand",
+    "load": "electricity_demand",
+    "total_load": "electricity_demand",
+    # climate
+    "temperature": "temperature_2m",
+    "temp": "temperature_2m",
+    "temperature_2m": "temperature_2m",
+    "t2m": "temperature_2m",
+    "solar": "solar_radiation",
+    "solar_rad": "solar_radiation",
+    "radiation": "solar_radiation",
+    "wind": "wind_speed_10m",
+    "wind_speed": "wind_speed_10m",
+    "windspeed": "wind_speed_10m",
+    "precipitation": "precipitation",
+    "precip": "precipitation",
+    "rain": "precipitation",
+    # macro / demographic
+    "gdp_growth": "gdp_growth",
+    "gdp_per_capita": "gdp_per_capita",
+    "gdppc": "gdp_per_capita",
+    "population": "total_population",
+    "pop": "total_population",
+    "population_growth": "population_growth",
+    "urbanisation": "urbanisation_rate",
+    "urbanization": "urbanisation_rate",
+    "inflation": "inflation_cpi",
+    "cpi": "inflation_cpi",
+    # energy
+    "generation": "total_electricity_generation",
+    "renewable_share": "renewable_generation_share",
+    "renewables": "renewable_generation_share",
+    "mix": "generation_mix",
+    "access": "electricity_access",
+    "manufacturing": "manufacturing_value_added",
+    "mva": "manufacturing_value_added",
+    # optional
+    "prices": "electricity_prices",
+    "price": "electricity_prices",
+    "ev": "ev_stock_sales",
+    "ev_stock": "ev_stock_sales",
+    "sectoral": "sectoral_electricity_demand",
+    "ac": "ac_heat_pump_penetration",
+    "heat_pump": "ac_heat_pump_penetration",
+    "holidays": "public_holidays",
+    # derived climate
+    "cdd": "cooling_degree_days",
+    "hdd": "heating_degree_days",
+}
+
+
+class FeatureNotFoundError(KeyError):
+    """Raised when a feature concept/alias cannot be resolved.
+
+    Carries a helpful suggestion message so callers can surface
+    'did you mean X' instead of a raw KeyError.
+    """
+
+    def __init__(self, name: str, suggestions: list[str] | None = None):
+        self.name = name
+        self.suggestions = suggestions or []
+        super().__init__(name)
+
 
 @dataclass(frozen=True)
 class FeatureSpec:
@@ -134,8 +202,58 @@ def _load() -> dict[str, FeatureSpec]:
 FEATURE_REGISTRY = _load()
 
 
+def _suggest_features(name: str, limit: int = 5) -> list[str]:
+    import difflib
+    key = (name or "").strip().lower().replace("_", " ").replace("-", " ")
+    candidates = list(FEATURE_REGISTRY.keys()) + list(FEATURE_ALIASES.keys())
+    matches = difflib.get_close_matches(key, candidates, n=limit, cutoff=0.4)
+    # Map back to canonical concepts, preserving order and dedup.
+    out: list[str] = []
+    for m in matches:
+        canon = FEATURE_ALIASES.get(m, m)
+        if canon not in out:
+            out.append(canon)
+    return out
+
+
+def resolve_feature_concept(name: str) -> str:
+    """Resolve a feature concept or alias to its canonical concept.
+
+    Raises FeatureNotFoundError (with suggestions) for unknown names so that
+    callers can produce a helpful message instead of a raw KeyError.
+    """
+    key = (name or "").strip().lower()
+    if key in FEATURE_REGISTRY:
+        return key
+    canon = FEATURE_ALIASES.get(key)
+    if canon and canon in FEATURE_REGISTRY:
+        return canon
+    raise FeatureNotFoundError(name, _suggest_features(name))
+
+
+def format_feature_not_found(name: str) -> str:
+    suggestions = _suggest_features(name)
+    lines = [f"Unknown feature: '{name}'"]
+    if suggestions:
+        lines.append("Did you mean:")
+        for s in suggestions:
+            lines.append(f"  {s}")
+    lines.append("Available features:")
+    for f in get_all_features():
+        lines.append(f"  {f.concept}")
+    return "\n".join(lines)
+
+
+def list_feature_concepts() -> list[str]:
+    return sorted(FEATURE_REGISTRY.keys())
+
+
 def get_feature(concept: str) -> FeatureSpec | None:
-    return FEATURE_REGISTRY.get(concept.strip().lower())
+    key = concept.strip().lower()
+    if key in FEATURE_REGISTRY:
+        return FEATURE_REGISTRY[key]
+    canon = FEATURE_ALIASES.get(key)
+    return FEATURE_REGISTRY.get(canon) if canon else None
 
 
 def get_target_feature() -> FeatureSpec:
@@ -187,9 +305,11 @@ def get_all_features() -> list[FeatureSpec]:
 
 
 __all__ = [
-    "FeatureSpec", "FEATURE_REGISTRY", "get_feature", "get_target_feature",
-    "get_core_features", "get_core_exogenous", "get_extended_features",
-    "get_optional_features", "get_features_by_tier", "get_all_features",
+    "FeatureSpec", "FEATURE_REGISTRY", "FEATURE_ALIASES", "get_feature",
+    "get_target_feature", "get_core_features", "get_core_exogenous",
+    "get_extended_features", "get_optional_features", "get_features_by_tier",
+    "get_all_features", "resolve_feature_concept", "format_feature_not_found",
+    "list_feature_concepts", "FeatureNotFoundError",
     "ROLE_TARGET", "ROLE_CORE_EXOGENOUS", "ROLE_EXTENDED_EXOGENOUS",
     "ROLE_OPTIONAL_EXOGENOUS", "TIER_TARGET", "TIER_CORE", "TIER_EXTENDED",
     "TIER_OPTIONAL",

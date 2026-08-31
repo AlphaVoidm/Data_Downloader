@@ -140,11 +140,15 @@ def build_feature_summary(
     end_year: int,
     credentials: dict[str, str] | None = None,
 ) -> list[dict[str, Any]]:
-    """Per-feature availability counts (the GLOBAL AVAILABILITY summary)."""
+    """Per-feature availability counts over the CURRENT audit scope.
+
+    The denominator is len(countries) — never the global registry size.
+    """
     features = get_all_features()
+    total = len(countries)
     counts: dict[str, dict[str, Any]] = {
         f.concept: {"feature": f.concept, "feature_name": f.name, "tier": f.tier,
-                    "available": 0, "auth_required": 0, "unavailable": 0}
+                    "available": 0, "auth_required": 0, "unavailable": 0, "total": total}
         for f in features
     }
     for iso3 in countries:
@@ -249,12 +253,13 @@ def render_audit_report(audit: dict[str, Any]) -> str:
     lines.append("")
 
     lines.append("  2. FEATURE_COVERAGE — explanatory/contextual features (per feature):")
-    lines.append(f"    {'FEATURE':<28} {'TIER':<9} {'AVAILABLE':>9} {'AUTH':>6} {'UNAVAIL':>8}")
-    lines.append("    " + "─" * 62)
+    denom = audit["countries_evaluated"]
+    lines.append(f"    {'FEATURE':<28} {'TIER':<9} {'AVAILABLE':>14} {'AUTH':>6} {'UNAVAIL':>8}")
+    lines.append("    " + "─" * 66)
     for f in audit["feature_summary"]:
         lines.append(
             f"    {f['feature'][:27]:<28} {f['tier']:<9} "
-            f"{f['available']:>6}/194 {f['auth_required']:>6} {f['unavailable']:>8}"
+            f"{f['available']:>6}/{denom} {f['auth_required']:>6} {f['unavailable']:>8}"
         )
     lines.append("")
 
@@ -276,7 +281,8 @@ def render_audit_report(audit: dict[str, Any]) -> str:
                 f"{row['research_ready']:<18}"
             )
     lines.append("")
-    lines.append("  Enable acquisition only for countries marked RESEARCH_READY.")
+    lines.append("  Acquisition eligibility: TARGET_READY (monthly demand). Optional/extended")
+    lines.append("  gaps never block useful data — readiness is reported separately.")
     lines.append("")
     return "\n".join(lines)
 

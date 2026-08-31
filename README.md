@@ -55,12 +55,14 @@ config/
 
 - **TARGET** (1): `electricity_demand` — the forecasting target; THE fundamental
   requirement. Nothing else is mandatory.
-- **CORE** (14): `temperature_2m`, `solar_radiation`, `wind_speed_10m`,
+- **CORE** (13): `temperature_2m`, `solar_radiation`, `wind_speed_10m`,
   `precipitation`, `gdp`, `gdp_growth`, `gdp_per_capita`, `total_population`,
-  `urbanisation_rate`, `total_electricity_generation`, `renewable_generation_share`,
-  `generation_mix`, `electricity_access`, `manufacturing_value_added`.
-- **EXTENDED** (5): `inflation_cpi`, `population_growth`, `urban_population`,
-  `cooling_degree_days`, `heating_degree_days` — tracked, never required.
+  `population_growth`, `urbanisation_rate`, `electricity_access`,
+  `manufacturing_value_added`, `renewable_generation_share`.
+- **EXTENDED** (6): `total_electricity_generation`, `generation_mix`,
+  `inflation_cpi`, `urban_population`, `cooling_degree_days`,
+  `heating_degree_days` — tracked, never required (`generation_mix` has no
+  reliable public path yet, so it stays out of core).
 - **OPTIONAL** (5): `electricity_prices`, `ev_stock_sales`,
   `sectoral_electricity_demand`, `ac_heat_pump_penetration`, `public_holidays` —
   coverage-limited; **never disqualify a country**.
@@ -88,7 +90,7 @@ missing months, longest continuous run, and gap count.
   (`MONTHLY_SUFFICIENT`/…), from a configurable rule (`min_history_months`,
   `min_consecutive_months`).
 - **FEATURE_COVERAGE** — independent `core / extended / optional` counts per
-  country (e.g. `14/14`, `5/5`, `2/5`).
+  country (e.g. `13/13`, `6/6`, `2/5`).
 - **RESEARCH_READY** — `TARGET_READY` **AND** configurable minimum core coverage
   (default 80%); optional/extended features are reported but never gate.
 

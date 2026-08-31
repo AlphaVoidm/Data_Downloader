@@ -149,6 +149,36 @@ def get_credential(credentials: dict[str, str] | None, env_var: str) -> str | No
     return os.getenv(env_var)
 
 
+def acquisition_status_for_verification(status: str) -> str:
+    """Map an endpoint-verification status onto the acquisition status vocabulary.
+
+    Preserves granularity so e.g. an HTML portal or invalid JSON is never
+    silently collapsed to ``NOT_VERIFIED`` (an HTTP 200 is never success).
+    """
+    s = (status or "").strip()
+    if s in ("VERIFIED", "SUCCESS"):
+        return SUCCESS
+    return {
+        AUTH_FAILED: AUTH_FAILED,
+        RATE_LIMITED: RATE_LIMITED,
+        NETWORK_ERROR: NETWORK_ERROR,
+        TIMEOUT: TIMEOUT,
+        PORTAL_HTML: NON_DATA_RESPONSE,
+        NON_DATA_RESPONSE: NON_DATA_RESPONSE,
+        INVALID_XML: PARSE_ERROR,
+        INVALID_JSON: PARSE_ERROR,
+        INVALID_CSV: PARSE_ERROR,
+        EMPTY_RESPONSE: EMPTY_RESPONSE,
+        SCHEMA_MISMATCH: SCHEMA_MISMATCH,
+        NO_RECORDS: NO_RECORDS,
+        "DEPENDENCY_MISSING": "DEPENDENCY_MISSING",
+        "MAPPING_REQUIRED": "MAPPING_REQUIRED",
+        "NOT_SUPPORTED": "NOT_SUPPORTED",
+        "SKIPPED": "SKIPPED",
+        "BULK_MANUAL": "BULK_MANUAL",
+    }.get(s, "NOT_VERIFIED")
+
+
 def verification_from_result(
     result: ValidationResult, source_id: str, country: str, feature: str
 ) -> EndpointVerification:
@@ -217,5 +247,6 @@ __all__ = [
     "SCHEMA_MISMATCH", "EMPTY_RESPONSE", "BULK_MANUAL",
     "VERIFIED", "NOT_VERIFIED", "SKIPPED",
     "EndpointVerification", "AcquisitionOutcome", "ConnectorError",
-    "get_credential", "verification_from_result", "outcome_from_result", "_HTTP",
+    "get_credential", "acquisition_status_for_verification",
+    "verification_from_result", "outcome_from_result", "_HTTP",
 ]

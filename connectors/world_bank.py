@@ -13,6 +13,7 @@ from .base import (
     AcquisitionOutcome,
     ConnectorError,
     _HTTP,
+    acquisition_status_for_verification,
     outcome_from_result,
     verification_from_result,
 )
@@ -121,7 +122,7 @@ def world_bank_connector(country: str, feature: str, start: int, end: int, crede
     if verification.status != "VERIFIED":
         return verification, AcquisitionOutcome(
             source_id="world_bank", country=country, feature=feature,
-            status=verification.status if verification.status in ("RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT") else "NOT_VERIFIED",
+            status=acquisition_status_for_verification(verification.status),
             message=verification.message, failure_reason=verification.status,
         )
     outcome = acquire_world_bank(country, feature, start, end, out_dir)

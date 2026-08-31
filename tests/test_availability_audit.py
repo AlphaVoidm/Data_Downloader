@@ -56,6 +56,23 @@ class AvailabilityAuditTest(unittest.TestCase):
             self.assertIn("RESEARCH_READY", payload["research_summary"])
             self.assertIn("research_config", payload)
 
+    def test_10_country_audit_uses_10_denominator(self):
+        countries = ["EGY", "DEU", "FRA", "GBR", "USA", "JPN", "IND", "BRA", "ZAF", "AUS"]
+        rows = build_feature_summary(countries, 2000, 2024, {"EMBER_API_KEY": "x"})
+        for r in rows:
+            self.assertEqual(r["total"], 10)
+            # available + auth + unavailable always sums to the audit scope
+            self.assertEqual(r["available"] + r["auth_required"] + r["unavailable"], 10)
+
+    def test_194_country_audit_uses_194_denominator(self):
+        from country_registry import get_all_countries
+        countries = [rec.iso3 for rec in get_all_countries()]
+        self.assertEqual(len(countries), 194)
+        rows = build_feature_summary(countries, 2000, 2024, {"EMBER_API_KEY": "x"})
+        for r in rows:
+            self.assertEqual(r["total"], 194)
+            self.assertEqual(r["available"] + r["auth_required"] + r["unavailable"], 194)
+
     def test_render_contains_headers(self):
         audit = run_availability_audit(countries=["EGY"], start_year=2000, end_year=2024,
                                        credentials={"EMBER_API_KEY": "x"})

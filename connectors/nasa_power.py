@@ -19,6 +19,7 @@ from .base import (
     AcquisitionOutcome,
     ConnectorError,
     _HTTP,
+    acquisition_status_for_verification,
     outcome_from_result,
     verification_from_result,
 )
@@ -111,7 +112,9 @@ def _aggregate_monthly(daily: pd.DataFrame) -> pd.DataFrame:
         cooling_degree_days=("cdd_daily", "sum"),
         heating_degree_days=("hdd_daily", "sum"),
     ).reset_index().rename(columns={"month": "date"})
-    monthly = monthly.round(3)
+    # Round numeric columns only (never datetime/period columns).
+    numeric_cols = monthly.select_dtypes(include="number").columns
+    monthly[numeric_cols] = monthly[numeric_cols].round(3)
     return monthly
 
 
@@ -163,7 +166,7 @@ def nasa_power_connector(country: str, feature: str, start: int, end: int, crede
     if verification.status != "VERIFIED":
         return verification, AcquisitionOutcome(
             source_id="nasa_power", country=country, feature=feature,
-            status=verification.status if verification.status in ("RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT", "MAPPING_REQUIRED") else "NOT_VERIFIED",
+            status=acquisition_status_for_verification(verification.status),
             message=verification.message, failure_reason=verification.status,
         )
     outcome = acquire_nasa(country, feature, start, end, out_dir)

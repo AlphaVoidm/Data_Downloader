@@ -14,6 +14,7 @@ from .base import (
     AcquisitionOutcome,
     ConnectorError,
     _HTTP,
+    acquisition_status_for_verification,
     outcome_from_result,
     verification_from_result,
 )
@@ -102,7 +103,7 @@ def acquire_neso(country: str, start_year: int, end_year: int, out_dir: Path) ->
 def neso_connector(country: str, feature: str, start: int, end: int, credentials: dict[str, str] | None, out_dir: Path, **_: Any):
     verification = verify_neso(country)
     if verification.status != "VERIFIED":
-        status = verification.status if verification.status in ("NOT_SUPPORTED", "RATE_LIMITED", "NETWORK_ERROR", "TIMEOUT") else "NOT_VERIFIED"
+        status = acquisition_status_for_verification(verification.status)
         return verification, AcquisitionOutcome(
             source_id="neso", country=country, feature=feature, status=status,
             message=verification.message, failure_reason=verification.status,

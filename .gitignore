@@ -21,3 +21,7 @@ metadata/
 # OS / editor
 .DS_Store
 Thumbs.db
+
+# Compromised credential dump (rotated — never re-add)
+DOC-20260828-WA0013.env
+*.env.local

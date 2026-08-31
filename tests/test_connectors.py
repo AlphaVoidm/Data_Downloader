@@ -2,8 +2,11 @@
 import json
 import tempfile
 import unittest
+import warnings
 from pathlib import Path
 from unittest import mock
+
+import pandas as pd
 
 from connectors import ember as ember_mod
 from connectors import era5 as era5_mod
@@ -113,6 +116,27 @@ class NasaErrorTest(unittest.TestCase):
 
     def test_timeout(self):
         self.assertEqual(nasa_mod._classify_nasa_error(Exception("ReadTimeout")), "TIMEOUT")
+
+    def test_monthly_aggregation_rounds_numeric_only(self):
+        # Rounding the whole frame used to emit a "round has no effect with
+        # datetime" warning; numeric-only rounding must not warn and must
+        # leave the datetime column intact.
+        daily = pd.DataFrame({
+            "date": pd.to_datetime(["2024-01-01", "2024-01-02",
+                                    "2024-02-01", "2024-02-02"]),
+            "t2m": [10.12345, 20.0, 5.0, 6.0],
+            "solar": [1.1, 2.2, 3.3, 4.4],
+            "wind": [2.1, 3.2, 4.3, 5.4],
+            "precip": [0.1, 0.2, 0.3, 0.4],
+        })
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")  # any warning becomes an error
+            monthly = nasa_mod._aggregate_monthly(daily)
+        self.assertIn("date", monthly.columns)
+        self.assertTrue(pd.api.types.is_datetime64_any_dtype(monthly["date"]))
+        # numeric columns are rounded to 3 dp
+        expected = round((10.12345 + 20.0) / 2, 3)
+        self.assertAlmostEqual(monthly["temperature_2m"].iloc[0], expected, places=3)
 
 
 if __name__ == "__main__":

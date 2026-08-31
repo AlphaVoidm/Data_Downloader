@@ -44,8 +44,8 @@ def source_status(status: str) -> str:
     if s in ALL_SOURCE_STATUSES:
         return s
 
-    # success / verified
-    if s in ("SUCCESS", "PARTIAL_SUCCESS", "VERIFIED", "OK"):
+    # success / verified / discovery-supported
+    if s in ("SUCCESS", "PARTIAL_SUCCESS", "VERIFIED", "OK", "SUPPORTED"):
         return SOURCE_SUCCESS
 
     # not covered
