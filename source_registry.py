@@ -1,20 +1,36 @@
-"""Source Coverage Registry for HGT-QF Data Desk.
+"""Component 3 — Source Coverage Registry for HGT-QF Data Desk.
 
-Maintains verified provider metadata, accessibility rules, native frequencies,
-licensing, and country eligibility validation.
+Maintains verified provider metadata plus the *coverage* attributes required by
+the Coverage Engine (Component 4):
+
+    dataset_type          tabular | geospatial
+    coverage_scope        global | regional:<x> | national:<iso3>
+    coverage_countries    approximate number of geographies covered
+    coverage_frequency    native frequency(s)
+    auth_required         none | api_key | api_token | cds_credentials
+    credential_env        env var holding the credential
+    variables             comma-separated concepts this source provides
+
+This is what lets the system answer "which sources actually exist for country X,
+feature Y, at frequency Z, over period P" *before* any network request is made.
 """
 from __future__ import annotations
 
 import csv
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
-CONFIG_DIR = Path(__file__).parent / "config"
-if not (CONFIG_DIR / "source_registry.csv").exists():
-    _alt = Path("/home/claude/config")
-    if (_alt / "source_registry.csv").exists():
-        CONFIG_DIR = _alt
+
+def _resolve_config_dir() -> Path:
+    """Locate the config directory (config/ preferred, repo root fallback)."""
+    root = Path(__file__).parent
+    for candidate in (root / "config", root, Path("/home/claude/config")):
+        if (candidate / "source_registry.csv").exists():
+            return candidate
+    return root / "config"
+
+
+CONFIG_DIR = _resolve_config_dir()
 SOURCE_REGISTRY_CSV = CONFIG_DIR / "source_registry.csv"
 
 
@@ -36,6 +52,14 @@ class SourceMetadata:
     historical_end: int
     academic_relevance: str
     notes: str
+    # --- Coverage-engine extensions ---
+    dataset_type: str = "tabular"
+    coverage_scope: str = "global"
+    coverage_countries_approx: str = ""
+    coverage_frequency: str = ""
+    auth_required: str = "none"
+    credential_env: str = ""
+    variables: str = ""
 
 
 def load_source_registry() -> dict[str, SourceMetadata]:
@@ -65,6 +89,13 @@ def load_source_registry() -> dict[str, SourceMetadata]:
                 historical_end=int(row.get("historical_end", 2025) or 2025),
                 academic_relevance=row.get("academic_relevance", "").strip(),
                 notes=row.get("notes", "").strip(),
+                dataset_type=row.get("dataset_type", "tabular").strip(),
+                coverage_scope=row.get("coverage_scope", "global").strip(),
+                coverage_countries_approx=row.get("coverage_countries_approx", "").strip(),
+                coverage_frequency=row.get("coverage_frequency", "").strip(),
+                auth_required=row.get("auth_required", "none").strip(),
+                credential_env=row.get("credential_env", "").strip(),
+                variables=row.get("variables", "").strip(),
             )
     return registry
 
@@ -81,3 +112,19 @@ def get_all_registered_sources() -> list[SourceMetadata]:
     """Return all registered source specifications."""
     return list(SOURCE_REGISTRY.values())
 
+
+def get_sources_for_variable(concept: str) -> list[SourceMetadata]:
+    """Return sources that declare they provide a given concept/variable."""
+    concept_norm = concept.strip().lower()
+    matches = []
+    for meta in SOURCE_REGISTRY.values():
+        variables = {v.strip().lower() for v in meta.variables.split(",")} if meta.variables else set()
+        if concept_norm in variables or meta.concept.strip().lower() == concept_norm:
+            matches.append(meta)
+    return matches
+
+
+__all__ = [
+    "SourceMetadata", "SOURCE_REGISTRY", "get_source_metadata",
+    "get_all_registered_sources", "get_sources_for_variable",
+]

@@ -21,6 +21,7 @@ from country_utils import (
     get_preset_countries,
     normalize_country,
 )
+from availability_audit import render_audit_report, run_availability_audit
 from pipeline import (
     SOURCES,
     STATUS_BADGES,
@@ -134,6 +135,7 @@ with st.sidebar:
 
 tabs = st.tabs([
     "🚀 Acquisition & Status",
+    "🧭 Availability Audit",
     "🗺️ Source Area Mappings",
     "🌐 Country Coverage Inventory",
     "📦 Feature Inventory (25 Vars)",
@@ -269,9 +271,69 @@ with tabs[0]:
         st.info("👈 Choose candidate countries in the sidebar and press **Run Acquisition & Build Inventory**.")
 
 # ============================================================================
-# Tab 2: Source Area Mappings
+# Tab 2: Availability Audit
 # ============================================================================
 with tabs[1]:
+    st.subheader("🧭 HGT-QF Global Data Availability Audit")
+    st.markdown(
+        "Deterministic **country × feature × source × period** audit computed from the "
+        "registries — **no downloads and no API calls**. Run this before bulk acquisition."
+    )
+
+    def _parse_audit_countries() -> list[str]:
+        codes: list[str] = []
+        for line in country_text.replace(",", "\n").splitlines():
+            line_clean = line.strip()
+            if line_clean:
+                iso3 = normalize_country(line_clean)
+                if iso3 and iso3 not in codes:
+                    codes.append(iso3)
+        return codes
+
+    audit_countries = _parse_audit_countries()
+    if not audit_countries:
+        from country_registry import get_all_countries
+        audit_countries = [r.iso3 for r in get_all_countries()]
+
+    col_a, col_b = st.columns([1, 2])
+    with col_a:
+        top_n = st.number_input("Recommended countries", min_value=1, max_value=50, value=20)
+        run_audit_btn = st.button("🧭 Run Availability Audit", type="primary", use_container_width=True)
+    with col_b:
+        st.caption(
+            f"Auditing {len(audit_countries)} countries ({int(start_year)}–{int(end_year)}). "
+            "🔑 ACCESS_REQUIRES_AUTH = data exists but a credential is missing."
+        )
+
+    if run_audit_btn:
+        with st.spinner("Running deterministic coverage audit…"):
+            audit = run_availability_audit(
+                countries=audit_countries,
+                start_year=int(start_year),
+                end_year=int(end_year),
+                output_dir=str(Path.cwd() / "hgt_qf_audit"),
+                top_n=int(top_n),
+            )
+        st.session_state.audit_report = render_audit_report(audit)
+        st.session_state.audit_result = audit
+        st.download_button(
+            "📥 Download audit JSON",
+            data=json.dumps(audit, indent=2, default=str),
+            file_name="availability_audit.json",
+            mime="application/json",
+        )
+
+    if st.session_state.get("audit_report"):
+        st.code(st.session_state.audit_report, language=None)
+        detail_csv = Path.cwd() / "hgt_qf_audit" / "metadata" / "feature_coverage_detail.csv"
+        if detail_csv.exists():
+            with st.expander("📊 Full country × feature coverage detail", expanded=False):
+                st.dataframe(pd.read_csv(detail_csv), use_container_width=True, hide_index=True)
+
+# ============================================================================
+# Tab 3: Source Area Mappings
+# ============================================================================
+with tabs[2]:
     st.subheader("🗺️ Verified Source-Specific Geographic Area Mappings")
     st.markdown("Maps canonical ISO-3 country codes to provider-specific identifiers (ENTSO-E EIC codes, EIA balancing authorities, AEMO region codes).")
 
@@ -302,9 +364,9 @@ with tabs[1]:
         st.warning("No mappings found in config/source_area_mapping.csv.")
 
 # ============================================================================
-# Tab 3: Country Coverage Inventory
+# Tab 4: Country Coverage Inventory
 # ============================================================================
-with tabs[2]:
+with tabs[3]:
     st.subheader("🌐 Country-Level Research Data Inventory")
     st.markdown("Availability matrix mapping candidate countries against HGT-QF feature domains.")
 
@@ -351,9 +413,9 @@ with tabs[2]:
         st.info("Country coverage inventory will be generated automatically after acquisition.")
 
 # ============================================================================
-# Tab 4: Feature Inventory (25 Variables)
+# Tab 5: Feature Inventory (25 Variables)
 # ============================================================================
-with tabs[3]:
+with tabs[4]:
     st.subheader("📦 HGT-QF 25-Feature Research Input Space Inventory")
     st.markdown("Authoritative specifications for all 25 conceptual variables defined in the HGT-QF research design.")
 
@@ -389,9 +451,9 @@ with tabs[3]:
     )
 
 # ============================================================================
-# Tab 5: Historical Coverage & L=120 Feasibility
+# Tab 6: Historical Coverage & L=120 Feasibility
 # ============================================================================
-with tabs[4]:
+with tabs[5]:
     st.subheader("⏳ Historical Coverage Depth & Lookback Feasibility ($L=120, H=12,36,60$)")
     st.markdown("Evaluates historical time horizons of electricity demand data to determine candidate suitability for sequence modeling.")
 
@@ -439,9 +501,9 @@ with tabs[4]:
         st.info("Historical coverage analysis will appear here after electricity demand acquisition.")
 
 # ============================================================================
-# Tab 6: Dataset Manifests & Hashes
+# Tab 7: Dataset Manifests & Hashes
 # ============================================================================
-with tabs[5]:
+with tabs[6]:
     st.subheader("📜 Dataset Manifest & SHA-256 Cryptographic Audit")
     st.markdown("Reproducibility manifest recording SHA-256 hashes, file locations, request parameters, and sentinel detection.")
 
@@ -488,9 +550,9 @@ with tabs[5]:
         st.info("Dataset manifest will be compiled upon acquisition.")
 
 # ============================================================================
-# Tab 7: Source Registry & Licenses
+# Tab 8: Source Registry & Licenses
 # ============================================================================
-with tabs[6]:
+with tabs[7]:
     st.subheader("📚 Verified Source Registry, Documentation & Licensing Terms")
 
     sources_list = get_all_registered_sources()

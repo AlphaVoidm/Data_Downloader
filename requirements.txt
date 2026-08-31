@@ -1,6 +1,13 @@
+# Core (required for the dashboard, coverage engine, and tabular adapters)
 streamlit>=1.39
 pandas>=2.2
+numpy>=1.26
 requests>=2.32
 pycountry>=24.6
 python-dotenv>=1.0
 openpyxl>=3.1
+
+# Scientific geospatial extractor (ERA5 / CMIP6 via the CDS API) — optional
+# cdsapi>=0.7
+# xarray>=2024.1
+# pyarrow>=15.0        # Parquet output (falls back to CSV when absent)

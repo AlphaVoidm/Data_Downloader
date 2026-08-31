@@ -13,12 +13,14 @@ from typing import Any
 
 from country_utils import get_country_coordinates
 
-CONFIG_DIR = Path(__file__).parent / "config"
-# Also check project root config/ if local config/ is missing (supports both dev and deployment)
+_ROOT = Path(__file__).parent
+CONFIG_DIR = _ROOT / "config"
+# Resolve config directory: config/ preferred, then repo root, then legacy alt path.
 if not (CONFIG_DIR / "source_area_mapping.csv").exists():
-    _alt = Path("/home/claude/config")
-    if (_alt / "source_area_mapping.csv").exists():
-        CONFIG_DIR = _alt
+    for _alt in (_ROOT, Path("/home/claude/config")):
+        if (_alt / "source_area_mapping.csv").exists():
+            CONFIG_DIR = _alt
+            break
 AREA_MAPPING_CSV = CONFIG_DIR / "source_area_mapping.csv"
 
 

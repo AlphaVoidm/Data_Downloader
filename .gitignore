@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local credentials
+.env
+
+# Generated data / audit outputs (large, reproducible)
+hgt_qf_data/
+hgt_qf_audit/
+climate/
+raw/
+quality/
+harmonized/
+model_ready/
+metadata/
+
+# OS / editor
+.DS_Store
+Thumbs.db
