@@ -270,14 +270,18 @@ def acquire_feature(
         base.attempts[-1]["note"] = verification.message
 
     # All supported sources failed verification/download. Report the
-    # highest-priority (first) source's outcome as the final status.
+    # highest-priority (first) source's outcome as the final status, and keep
+    # the per-source diagnostic notes (e.g. Ember "available series: …") in the
+    # message so the researcher sees exactly what each source had.
     if base.attempts:
         base.status = base.attempts[0].get("failure_reason", "NOT_VERIFIED")
         base.failure_reason = base.status
+        notes = [a.get("note") for a in base.attempts if a.get("note")]
+        base.message = " | ".join(notes) if notes else "All supported sources failed verification or download"
     else:
         base.status = "NOT_VERIFIED"
         base.failure_reason = "NOT_VERIFIED"
-    base.message = "All supported sources failed verification or download"
+        base.message = "All supported sources failed verification or download"
     return base
 
 

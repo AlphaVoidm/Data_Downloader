@@ -89,5 +89,77 @@ class NagerSemanticsTest(unittest.TestCase):
         self.assertIsNone(misc._iso2("NOPE"))
 
 
+class EmberDiscoverySemanticsTest(unittest.TestCase):
+    """Ember must discover what a country actually exposes and must never
+    manufacture an electricity-demand series out of generation data."""
+
+    def _generation_only_rows(self):
+        return [
+            {"date": "2024-01", "series": "Coal", "generation_twh": 1.0,
+             "share_of_generation_pct": 5.0},
+            {"date": "2024-01", "series": "Gas", "generation_twh": 2.0,
+             "share_of_generation_pct": 10.0},
+            {"date": "2024-01", "series": "Total generation", "generation_twh": 20.0,
+             "share_of_generation_pct": 100.0},
+            {"date": "2024-01", "series": "Net imports", "generation_twh": -1.0,
+             "share_of_generation_pct": -5.0},
+        ]
+
+    def _demand_rows(self):
+        return [
+            {"date": "2024-01", "series": "Demand", "demand_twh": 15.0},
+            {"date": "2024-02", "series": "Demand", "demand_twh": 14.5},
+        ]
+
+    def test_no_demand_series_is_no_data_not_fabricated(self):
+        from connectors import ember
+
+        def fake_get(url, **kwargs):
+            if "electricity-demand" in url:
+                return _FakeResp(200, [])
+            return _FakeResp(200, self._generation_only_rows())
+
+        with mock.patch("connectors.ember._HTTP.get", side_effect=fake_get):
+            outcome = ember.acquire_ember(
+                "EGY", "electricity_demand", 2024, 2024, key="k", out_dir=Path(tempfile.mkdtemp()))
+
+        self.assertEqual(outcome.status, "NO_DATA")
+        self.assertIn("Total generation", outcome.message)   # what Ember actually has
+        self.assertIn("demand=False", outcome.message)       # explicit demand=absent
+        self.assertTrue(outcome.provenance["has_generation"])
+        self.assertFalse(outcome.provenance["has_demand"])
+        self.assertNotIn("Demand", outcome.provenance["available_series"])
+        self.assertEqual(outcome.path, "")  # no demand file fabricated
+
+    def test_genuine_demand_series_acquires(self):
+        from connectors import ember
+
+        def fake_get(url, **kwargs):
+            return _FakeResp(200, self._demand_rows())
+
+        with mock.patch("connectors.ember._HTTP.get", side_effect=fake_get):
+            outcome = ember.acquire_ember(
+                "EGY", "electricity_demand", 2024, 2024, key="k", out_dir=Path(tempfile.mkdtemp()))
+
+        self.assertEqual(outcome.status, "SUCCESS")
+        self.assertEqual(outcome.records, 2)
+        self.assertEqual(outcome.unit, "TWh")
+
+    def test_discover_reports_generation_no_demand(self):
+        from connectors import ember
+
+        def fake_get(url, **kwargs):
+            if "electricity-demand" in url:
+                return _FakeResp(200, [])
+            return _FakeResp(200, self._generation_only_rows())
+
+        with mock.patch("connectors.ember._HTTP.get", side_effect=fake_get):
+            discovery = ember.discover_ember_series("EGY", "k", 2024, 2024)
+
+        self.assertFalse(discovery["has_demand"])
+        self.assertTrue(discovery["has_generation"])
+        self.assertIn("Total generation", discovery["available_series"])
+
+
 if __name__ == "__main__":
     unittest.main()

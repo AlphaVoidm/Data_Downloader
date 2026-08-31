@@ -171,6 +171,55 @@ def _request(country: str, start_year: int, end_year: int, key: str, dataset: st
     return last_resp, validate_response(last_resp, expected_format="json", min_records=0), country
 
 
+def discover_ember_series(
+    country: str, key: str, start_year: int = 2024, end_year: int = 2024,
+) -> dict[str, Any]:
+    """Discover which electricity series Ember actually publishes for a country.
+
+    Queries both the generation and demand datasets (long-format `series`
+    column) and reports the distinct series present — e.g. Demand, Total
+    generation, Coal, Gas, Net imports. Used to distinguish "Ember has
+    generation but no demand" from "Ember has no data at all".
+
+    This is the dataset-discovery step: the connector records exactly what
+    exists instead of assuming "no demand records = country unavailable".
+    """
+    out: dict[str, Any] = {
+        "country": country,
+        "available_series": [],
+        "has_demand": False,
+        "has_generation": False,
+        "series_by_dataset": {},
+        "error": "",
+    }
+    for dataset in ("electricity-demand", "electricity-generation"):
+        history: list[Any] = []
+        try:
+            resp, result, _entity = _request(country, start_year, end_year, key, dataset, history)
+        except ConnectorError as exc:
+            out["series_by_dataset"][dataset] = f"error:{exc.status}"
+            out["error"] = exc.status
+            continue
+        if not result.ok or not isinstance(result.data, list):
+            out["series_by_dataset"][dataset] = f"status:{result.status}"
+            continue
+        df = pd.DataFrame(result.data)
+        if _SERIES_COL in df.columns:
+            series = sorted({str(s).strip() for s in df[_SERIES_COL].dropna()})
+        else:
+            series = []
+        out["series_by_dataset"][dataset] = series
+        out["available_series"].extend(series)
+
+    out["available_series"] = sorted(set(out["available_series"]))
+    lowered = {s.lower() for s in out["available_series"]}
+    out["has_demand"] = "demand" in lowered
+    gen_markers = ("total generation", "coal", "gas", "hydro", "wind", "solar",
+                   "nuclear", "bioenergy", "other renewables", "clean", "net imports")
+    out["has_generation"] = any(m in lowered for m in gen_markers)
+    return out
+
+
 def verify_ember(country: str, feature: str, key: str | None) -> EndpointVerification:
     if not key:
         return EndpointVerification(
@@ -208,6 +257,7 @@ def acquire_ember(
     df: pd.DataFrame | None = None
     last_result = None
     history: list[Any] = []
+    seen_series: set[str] = set()
     for ds in datasets:
         try:
             resp, result, entity = _request(country, start_year, end_year, key, ds, history)
@@ -223,6 +273,8 @@ def acquire_ember(
                 return outcome_from_result(result, "ember", country, feature, attempts=history)
             continue
         raw = pd.DataFrame(result.data)
+        if _SERIES_COL in raw.columns:
+            seen_series |= {str(s).strip() for s in raw[_SERIES_COL].dropna()}
         out_df, err = _extract(raw, feature)
         if out_df is not None and not out_df.empty:
             df = out_df
@@ -232,17 +284,30 @@ def acquire_ember(
             continue
 
     if df is None or df.empty:
-        if last_result is not None and last_result.status in ("NO_RECORDS",):
-            return AcquisitionOutcome(
-                source_id="ember", country=country, feature=feature, status="NO_RECORDS",
-                message=f"Ember returned no records for {feature}", failure_reason="NO_RECORDS",
-                attempts=history, http_status=last_result.http_status,
-                response_type=last_result.content_type,
-            )
+        # Dataset discovery: report what Ember ACTUALLY has for this country
+        # instead of a blanket NO_RECORDS. Never manufacture demand from
+        # generation.
+        discovery = discover_ember_series(country, key, start_year, end_year)
+        available = discovery["available_series"] or sorted(seen_series)
+        avail_note = ", ".join(available) if available else "none reported"
+        msg = (
+            f"Ember does not expose a '{feature}' series for {country} "
+            f"({start_year}-{end_year}). Available series: {avail_note}. "
+            f"(demand={discovery['has_demand']}, generation={discovery['has_generation']})"
+        )
         return AcquisitionOutcome(
-            source_id="ember", country=country, feature=feature, status="SCHEMA_MISMATCH",
-            message=f"Could not extract '{feature}' from Ember response",
-            failure_reason="SCHEMA_MISMATCH", attempts=history,
+            source_id="ember", country=country, feature=feature, status="NO_DATA",
+            message=msg, failure_reason="NO_DATA",
+            attempts=history,
+            http_status=last_result.http_status if last_result else None,
+            response_type=last_result.content_type if last_result else "",
+            verification_notes=[
+                f"Ember dataset discovery: available series [{avail_note}]",
+                "generation is never used to fabricate demand",
+            ],
+            provenance={"available_series": available, "has_demand": discovery["has_demand"],
+                        "has_generation": discovery["has_generation"],
+                        "series_by_dataset": discovery.get("series_by_dataset", {})},
         )
 
     out_df = out_df.rename(columns={out_df.columns[0]: "date"})
@@ -253,6 +318,9 @@ def acquire_ember(
     out_df.to_csv(out_path, index=False)
 
     unit = "TWh" if feature != "renewable_generation_share" else "%"
+    notes = [f"dataset {dataset}", "JSON valid", f"columns {list(out_df.columns)}"]
+    if seen_series:
+        notes.append(f"Ember series discovered: {', '.join(sorted(seen_series))}")
     return AcquisitionOutcome(
         source_id="ember", country=country, feature=feature,
         status="SUCCESS", message=f"{len(out_df)} Ember monthly records for {feature}",
@@ -261,8 +329,9 @@ def acquire_ember(
         received_start=str(out_df['date'].min())[:7] if len(out_df) else "",
         received_end=str(out_df['date'].max())[:7] if len(out_df) else "",
         schema_columns=list(out_df.columns),
-        verification_notes=[f"dataset {dataset}", "JSON valid", f"columns {list(out_df.columns)}"],
-        provenance={"endpoint": build_ember_url(dataset, "monthly", country, str(start_year), str(end_year))},
+        verification_notes=notes,
+        provenance={"endpoint": build_ember_url(dataset, "monthly", country, str(start_year), str(end_year)),
+                    "available_series": sorted(seen_series)},
         attempts=history,
     )
 
