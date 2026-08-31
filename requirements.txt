@@ -1,0 +1,6 @@
+streamlit>=1.39
+pandas>=2.2
+requests>=2.32
+pycountry>=24.6
+python-dotenv>=1.0
+openpyxl>=3.1
