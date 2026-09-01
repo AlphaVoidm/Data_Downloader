@@ -436,6 +436,71 @@ with tabs[0]:
             warn_partial_coverage=st.session_state.get("dp_warn_partial", True),
         )
 
+    # --- Live Acquisition Progress ---
+    if st.session_state.get("acquisition_running"):
+        from progress_ui import (
+            get_progress_tracker,
+            render_progress_ui,
+        )
+        import time
+        
+        progress_tracker = get_progress_tracker()
+        start_time = st.session_state.get("acquisition_start_time", time.time())
+        
+        # Render the progress UI
+        render_progress_ui(progress_tracker, start_time)
+        
+        # Run the acquisition if not already complete
+        if not st.session_state.get("acquisition_complete"):
+            params = st.session_state.acquisition_params
+            
+            # Run the pipeline with progress tracker
+            results = run_pipeline(
+                countries=params["countries"],
+                mode=params["mode"],
+                raw_dir=params["raw_dir"],
+                start=params["start"],
+                end=params["end"],
+                progress=None,  # We're using progress_tracker instead
+                credentials=params["credentials"],
+                progress_tracker=progress_tracker,
+            )
+            
+            # Mark acquisition as complete
+            st.session_state.acquisition_complete = True
+            st.session_state.acquisition_running = False
+            st.session_state.pipeline_results = results
+            st.session_state.run_mode = params["mode"]
+            st.session_state.output_root = params["raw_dir"]
+            st.session_state.countries = params["countries"]
+            st.session_state.start_yr = params["start"]
+            st.session_state.end_yr = params["end"]
+            
+            # Rerun to show final summary
+            st.rerun()
+        
+        # Show final summary if complete
+        if st.session_state.get("acquisition_complete"):
+            results = st.session_state.pipeline_results
+            st.success(f"✅ Downloaded {len(results)} datasets for {len(st.session_state.countries)} countries")
+            
+            ok_count = sum(1 for r in results if r.status == "SUCCESS")
+            partial_count = sum(1 for r in results if r.status == "PARTIAL_SUCCESS")
+            fail_count = sum(1 for r in results if r.status not in ("SUCCESS", "PARTIAL_SUCCESS"))
+            c1, c2, c3 = st.columns(3)
+            c1.metric("🟢 SUCCESS", ok_count)
+            c2.metric("🟡 PARTIAL", partial_count)
+            c3.metric("🔴 Other", fail_count)
+            
+            st.info(f"📁 Data stored in `{st.session_state.output_root}`. Switch to the **🚀 Acquisition & Status** tab for details.")
+            
+            # Button to start new acquisition
+            if st.button("🔄 Start New Acquisition"):
+                st.session_state.acquisition_running = False
+                st.session_state.acquisition_complete = False
+                st.session_state.selection_plan = None
+                st.rerun()
+
     # --- Handle Download ---
     if download_btn:
         if not selected_iso3:
@@ -481,49 +546,35 @@ with tabs[0]:
                         for w in policy_result.warnings:
                             st.warning(f"⚠️ {w}")
 
+                    # Import progress UI components
+                    from progress_ui import (
+                        init_progress_display,
+                        get_progress_tracker,
+                        reset_progress_display,
+                        render_progress_ui,
+                    )
+                    
+                    # Initialize progress display
+                    init_progress_display()
+                    reset_progress_display()
+                    progress_tracker = get_progress_tracker()
+                    
                     # Determine execution mode based on features
                     exec_mode = "long-term"  # default for multi-feature
-
-                    # Run the pipeline
-                    status_box = st.status("Downloading with strict validation...", expanded=True)
-
-                    def progress_cb(msg):
-                        status_box.write(f"📥 {msg}")
-
-                    results = run_pipeline(
-                        countries=selected_iso3,
-                        mode=exec_mode,
-                        raw_dir=raw_dir,
-                        start=int(sel_start_year),
-                        end=int(sel_end_year),
-                        progress=progress_cb,
-                        credentials=creds if creds else None,
-                    )
-
-                    status_box.update(
-                        label="✅ Download complete with validation!",
-                        state="complete",
-                        expanded=False,
-                    )
-
-                    st.session_state.pipeline_results = results
-                    st.session_state.run_mode = exec_mode
-                    st.session_state.output_root = raw_dir
-                    st.session_state.countries = selected_iso3
-                    st.session_state.start_yr = int(sel_start_year)
-                    st.session_state.end_yr = int(sel_end_year)
-
-                    # Show results summary
-                    st.success(f"✅ Downloaded {len(results)} datasets for {len(selected_iso3)} countries")
-                    ok_count = sum(1 for r in results if r.status == "SUCCESS")
-                    partial_count = sum(1 for r in results if r.status == "PARTIAL_SUCCESS")
-                    fail_count = sum(1 for r in results if r.status not in ("SUCCESS", "PARTIAL_SUCCESS"))
-                    c1, c2, c3 = st.columns(3)
-                    c1.metric("🟢 SUCCESS", ok_count)
-                    c2.metric("🟡 PARTIAL", partial_count)
-                    c3.metric("🔴 Other", fail_count)
-
-                    st.info(f"📁 Data stored in `{raw_dir}`. Switch to the **🚀 Acquisition & Status** tab for details.")
+                    
+                    # Store parameters for the acquisition
+                    st.session_state.acquisition_params = {
+                        "countries": selected_iso3,
+                        "mode": exec_mode,
+                        "raw_dir": raw_dir,
+                        "start": int(sel_start_year),
+                        "end": int(sel_end_year),
+                        "credentials": creds if creds else None,
+                    }
+                    st.session_state.acquisition_running = True
+                    
+                    # Trigger a rerun to start showing progress
+                    st.rerun()
 
 
 

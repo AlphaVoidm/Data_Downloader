@@ -793,6 +793,7 @@ def run_pipeline(
     end: int,
     progress: Callable[[str], None] | None = None,
     credentials: dict[str, str] | None = None,
+    progress_tracker: Any = None,
 ) -> list[SourceResult]:
     """
     Main verified acquisition orchestrator.
@@ -808,6 +809,10 @@ def run_pipeline(
     demand_coverage_data = []
 
     for country in countries:
+        # Check for cancellation
+        if progress_tracker and progress_tracker.cancelled:
+            break
+        
         c_name = get_country_name(country)
 
         # Track which demand sources succeeded for this country so we can
@@ -819,6 +824,11 @@ def run_pipeline(
         seen_source_names: set[str] = set()
 
         for source in selected_sources(mode):
+            # Check for cancellation
+            if progress_tracker and progress_tracker.cancelled:
+                progress_tracker.mark_remaining_as_cancelled()
+                break
+            
             # Ember deduplication: in short-term mode Ember appears twice in SOURCES
             # (once as long-term entry, once as short-term fallback). Only run it once.
             source_key = source.name
@@ -832,6 +842,22 @@ def run_pipeline(
             retrieved_at = datetime.now(timezone.utc).isoformat()
             output = get_raw_path(root, source.name, country, source.frequency)
 
+            # Report start of operation to progress tracker
+            if progress_tracker:
+                # Map source name to feature concept for progress tracking
+                feature_map = {
+                    "electricity_demand": "electricity_demand",
+                    "socioeconomic_demographic_energy": "gdp",
+                    "climate_meteorology": "temperature_2m",
+                    "public_holidays": "public_holidays",
+                    "climate_reanalysis": "temperature_2m",
+                    "climate_scenarios": "tas",
+                    "population_gdp_scenarios": "ssp_population",
+                    "population_raster": "total_population",
+                }
+                feature = feature_map.get(source.indicator, source.indicator)
+                progress_tracker.start_operation(country, feature)
+
             # 1. Pre-Flight Capability & Area Mapping Check.
             #    Gridded/bulk sources (ERA5, CMIP6, GPWv4, IIASA) are globally
             #    covered, so a "not covered" verdict is no longer possible for
@@ -839,6 +865,21 @@ def run_pipeline(
             #    ENTSO-E) ever return SOURCE_NOT_COVERED here.
             cap_status, cap_reason = validate_source_capability(country, source.name)
             if cap_status not in ("OK", "RESEARCH_TIER"):
+                # Report skipped status
+                if progress_tracker:
+                    from progress_tracker import AcquisitionStatus
+                    status_map = {
+                        "SOURCE_NOT_COVERED": AcquisitionStatus.SOURCE_NOT_COVERED,
+                        "MAPPING_MISSING": AcquisitionStatus.MAPPING_MISSING,
+                        "ACCESS_RESTRICTED": AcquisitionStatus.AUTH_REQUIRED,
+                    }
+                    progress_status = status_map.get(cap_status, AcquisitionStatus.FAILED)
+                    progress_tracker.complete_operation(
+                        country, feature,
+                        progress_status,
+                        0, cap_reason
+                    )
+                
                 results.append(
                     SourceResult(
                         country=country,
@@ -858,6 +899,14 @@ def run_pipeline(
 
             # 2. Execute Adapter
             try:
+                # Report downloading status
+                if progress_tracker:
+                    progress_tracker.update_operation(
+                        country, feature,
+                        AcquisitionStatus.DOWNLOADING,
+                        f"Downloading from {source.name}"
+                    )
+                
                 if source.name in ADAPTERS:
                     records, status, message = ADAPTERS[source.name](
                         country, output, start, end, credentials
@@ -880,6 +929,28 @@ def run_pipeline(
                     except Exception:
                         pass
 
+                # Report completion
+                if progress_tracker:
+                    from progress_tracker import AcquisitionStatus
+                    status_map = {
+                        "SUCCESS": AcquisitionStatus.SUCCESS,
+                        "PARTIAL_SUCCESS": AcquisitionStatus.PARTIAL_SUCCESS,
+                        "NO_DATA_AVAILABLE": AcquisitionStatus.NO_DATA_AVAILABLE,
+                        "SOURCE_NOT_COVERED": AcquisitionStatus.SOURCE_NOT_COVERED,
+                        "ACCESS_RESTRICTED": AcquisitionStatus.AUTH_REQUIRED,
+                        "MAPPING_MISSING": AcquisitionStatus.MAPPING_MISSING,
+                        "API_ERROR": AcquisitionStatus.FAILED,
+                        "DOWNLOAD_ERROR": AcquisitionStatus.FAILED,
+                        "INVALID_RESPONSE": AcquisitionStatus.FAILED,
+                    }
+                    progress_status = status_map.get(status, AcquisitionStatus.FAILED)
+                    progress_tracker.complete_operation(
+                        country, feature,
+                        progress_status,
+                        records,
+                        message
+                    )
+
                 results.append(
                     SourceResult(
                         country=country,
@@ -897,6 +968,13 @@ def run_pipeline(
                 )
 
             except PermissionError as exc:
+                if progress_tracker:
+                    progress_tracker.complete_operation(
+                        country, feature,
+                        AcquisitionStatus.AUTH_REQUIRED,
+                        0, str(exc)
+                    )
+                
                 results.append(
                     SourceResult(
                         country=country,
@@ -911,6 +989,13 @@ def run_pipeline(
                     )
                 )
             except Exception as exc:
+                if progress_tracker:
+                    progress_tracker.complete_operation(
+                        country, feature,
+                        AcquisitionStatus.FAILED,
+                        0, str(exc)
+                    )
+                
                 results.append(
                     SourceResult(
                         country=country,

@@ -231,12 +231,24 @@ def acquire_feature(
     end: int,
     out_dir: Path | str,
     credentials: dict[str, str] | None = None,
+    progress_tracker: Any = None,
 ) -> AcquiredFeature:
+    # Report start of operation
+    if progress_tracker:
+        progress_tracker.start_operation(country, concept)
+    
     # Canonical feature resolution — never expose a raw KeyError for a
     # user alias/typo.
     try:
         canonical = resolve_feature_concept(concept)
     except FeatureNotFoundError:
+        if progress_tracker:
+            from progress_tracker import AcquisitionStatus
+            progress_tracker.complete_operation(
+                country, concept, 
+                AcquisitionStatus.FAILED,
+                0, "Unknown feature"
+            )
         return AcquiredFeature(
             country=country.strip().upper(), country_name="", concept=concept.strip().lower(),
             name=concept, role="UNKNOWN", source_id="", source_name="",
@@ -269,6 +281,22 @@ def acquire_feature(
             TEMPORARILY_UNAVAILABLE: "No source currently available for the requested period",
             UNKNOWN: "Source(s) not present in the registry",
         }.get(plan.best_status, plan.best_status)
+        
+        # Report status to progress tracker
+        if progress_tracker:
+            from progress_tracker import AcquisitionStatus
+            status_map = {
+                "AUTH_REQUIRED": AcquisitionStatus.AUTH_REQUIRED,
+                "NOT_SUPPORTED": AcquisitionStatus.SOURCE_NOT_COVERED,
+                "MAPPING_REQUIRED": AcquisitionStatus.MAPPING_MISSING,
+            }
+            progress_status = status_map.get(plan.best_status, AcquisitionStatus.FAILED)
+            progress_tracker.complete_operation(
+                country, concept,
+                progress_status,
+                0, base.message
+            )
+        
         return base
 
     # Walk supported candidates in priority order with fallback.
@@ -279,6 +307,14 @@ def acquire_feature(
             base.attempts.append({"source": decision.source_name, "verification": "SKIPPED",
                                   "note": "no connector registered"})
             continue
+
+        # Report downloading status
+        if progress_tracker:
+            progress_tracker.update_operation(
+                country, concept,
+                AcquisitionStatus.DOWNLOADING,
+                f"Downloading from {decision.source_name}"
+            )
 
         verification, outcome = connector(
             country=country, feature=concept, start=start, end=end,
@@ -294,7 +330,24 @@ def acquire_feature(
 
         if verification.status == VERIFIED:
             if outcome.status in ("SUCCESS", "PARTIAL_SUCCESS"):
+                # Report validating status
+                if progress_tracker:
+                    progress_tracker.update_operation(
+                        country, concept,
+                        AcquisitionStatus.VALIDATING,
+                        "Validating downloaded data"
+                    )
+                
                 valid, validation_notes = _validate_download(outcome, country, concept, start, end)
+                
+                # Report saving status
+                if progress_tracker:
+                    progress_tracker.update_operation(
+                        country, concept,
+                        AcquisitionStatus.SAVING,
+                        "Saving validated dataset"
+                    )
+                
                 base.source_id = outcome.source_id
                 base.source_name = decision.source_name
                 base.status = outcome.status
@@ -314,6 +367,19 @@ def acquire_feature(
                 base.http_status = outcome.http_status
                 base.response_type = outcome.response_type
                 base.attempts[-1]["source_status"] = source_status(outcome.status)
+                
+                # Report completion
+                if progress_tracker:
+                    from progress_tracker import AcquisitionStatus
+                    progress_status = (AcquisitionStatus.SUCCESS if outcome.status == "SUCCESS" 
+                                     else AcquisitionStatus.PARTIAL_SUCCESS)
+                    progress_tracker.complete_operation(
+                        country, concept,
+                        progress_status,
+                        outcome.records,
+                        outcome.message
+                    )
+                
                 return base
             # Verified endpoint but non-successful outcome (e.g. BULK_MANUAL,
             # NO_RECORDS, SCHEMA_MISMATCH, NO_DATA) -> fall through.
@@ -347,6 +413,16 @@ def acquire_feature(
         base.status = "NOT_VERIFIED"
         base.failure_reason = "NOT_VERIFIED"
         base.message = "All supported sources failed verification or download"
+    
+    # Report failure to progress tracker
+    if progress_tracker:
+        from progress_tracker import AcquisitionStatus
+        progress_tracker.complete_operation(
+            country, concept,
+            AcquisitionStatus.FAILED,
+            0, base.message
+        )
+    
     return base
 
 
@@ -358,22 +434,64 @@ def run_acquisition(
     credentials: dict[str, str] | None = None,
     concepts: list[str] | None = None,
     progress: Callable[[str], None] | None = None,
+    progress_tracker: Any = None,
 ) -> list[AcquiredFeature]:
     if concepts is None:
         concepts = [f.concept for f in get_all_features()]
     results: list[AcquiredFeature] = []
+    
+    # Initialize progress tracker if provided
+    if progress_tracker:
+        # Build source map for initialization
+        source_map = {}
+        for iso3 in countries:
+            for concept in concepts:
+                try:
+                    plan = resolve_feature(concept, iso3, start, end, credentials)
+                    source_map[f"{iso3}_{concept}"] = plan.best_source_name or "unknown"
+                except Exception:
+                    source_map[f"{iso3}_{concept}"] = "unknown"
+        progress_tracker.initialize_operations(countries, concepts, source_map)
+    
     for iso3 in countries:
+        # Check for cancellation
+        if progress_tracker and progress_tracker.cancelled:
+            break
+        
         for concept in concepts:
+            # Check for cancellation before each operation
+            if progress_tracker and progress_tracker.cancelled:
+                progress_tracker.mark_remaining_as_cancelled()
+                break
+            
             if progress:
                 progress(f"{iso3} | {concept}")
             try:
-                results.append(acquire_feature(concept, iso3, start, end, out_dir, credentials))
+                result = acquire_feature(
+                    concept, iso3, start, end, out_dir, credentials,
+                    progress_tracker=progress_tracker
+                )
+                results.append(result)
             except Exception as exc:  # noqa: BLE001 — one failure must never abort the run
-                results.append(AcquiredFeature(
+                result = AcquiredFeature(
                     country=iso3, country_name="", concept=str(concept), name=str(concept),
                     role="", source_id="", source_name="", status="FAILED",
                     message=f"Unexpected error: {exc!r}", failure_reason="UNEXPECTED_ERROR",
-                ))
+                )
+                results.append(result)
+                # Report exception to progress tracker
+                if progress_tracker:
+                    from progress_tracker import AcquisitionStatus
+                    progress_tracker.complete_operation(
+                        iso3, concept,
+                        AcquisitionStatus.FAILED,
+                        0, f"Exception: {exc!r}"
+                    )
+    
+    # Mark any remaining operations as cancelled if we broke out early
+    if progress_tracker and progress_tracker.cancelled:
+        progress_tracker.mark_remaining_as_cancelled()
+    
     return results
 
 
