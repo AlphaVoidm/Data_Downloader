@@ -16,6 +16,12 @@ from feature_registry import resolve_feature_concept
 from source_registry import get_source
 from status_vocabulary import source_status
 
+# Re-export for selection_manager integration
+try:
+    from typing import Any as _Any
+except ImportError:
+    pass
+
 _STATUS_LABELS = {
     "SUPPORTED": "READY",
     "AUTH_REQUIRED": "AUTH_NEEDED",
@@ -100,4 +106,108 @@ def render_acquisition_plan(plan: pd.DataFrame) -> str:
     return "\n".join(lines)
 
 
-__all__ = ["build_acquisition_plan", "render_acquisition_plan"]
+def build_enhanced_plan(
+    countries: list[str],
+    features: list[str],
+    start_year: int,
+    end_year: int,
+    source_mode: str = "automatic",
+    source_overrides: dict[str, str] | None = None,
+    credentials: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Build an enhanced acquisition plan using the Selection Manager.
+
+    This integrates with selection_manager.py and provides:
+        - Full download plan with validation
+        - Per-country, per-feature source resolution
+        - Auth status, coverage overlap, fallback chains
+        - Pre-download validation
+
+    Returns a dict suitable for GUI rendering.
+    """
+    from selection_manager import (
+        build_download_plan, validate_selection, render_plan_preview,
+        MODE_AUTOMATIC, MODE_MANUAL,
+    )
+    from download_policy import validate_selection_policy, DownloadPolicy
+
+    plan_mode = MODE_MANUAL if source_mode == "manual" else MODE_AUTOMATIC
+
+    # Build the download plan
+    validation = validate_selection(
+        countries=countries,
+        features=features,
+        start_year=start_year,
+        end_year=end_year,
+        source_mode=plan_mode,
+        source_overrides=source_overrides,
+        credentials=credentials,
+    )
+
+    plan = validation["plan"]
+
+    # Check against download policy
+    policy_result = validate_selection_policy(validation["summary"])
+
+    # Build the preview
+    preview_text = render_plan_preview(plan)
+
+    # Build per-row details for a DataFrame
+    rows = []
+    for cp in plan.countries:
+        for sel in cp.selections:
+            # Get fallback info
+            try:
+                concept_plan = resolve_feature(
+                    sel.feature_concept, cp.iso3, start_year, end_year, credentials
+                )
+                best_idx = next(
+                    (i for i, d in enumerate(concept_plan.decisions)
+                     if d.source_id == sel.source_id),
+                    None,
+                )
+                after_best = concept_plan.decisions[(best_idx + 1):] if best_idx is not None else []
+                fallbacks = [
+                    d.source_name for d in after_best
+                    if d.status not in ("NOT_SUPPORTED", "UNKNOWN")
+                ]
+            except Exception:
+                fallbacks = []
+
+            rows.append({
+                "country": cp.iso3,
+                "country_name": cp.country_name,
+                "feature": sel.feature_concept,
+                "feature_name": sel.feature_name,
+                "feature_tier": sel.feature_tier,
+                "selected_source": sel.source_name,
+                "source_id": sel.source_id,
+                "fallback_sources": ";".join(fallbacks),
+                "coverage_status": _STATUS_LABELS.get(sel.coverage_status, sel.coverage_status),
+                "frequency": sel.frequency,
+                "auth_required": sel.auth_required,
+                "auth_satisfied": sel.auth_satisfied,
+                "period_overlap_months": sel.period_overlap_months,
+                "reason": sel.reason,
+                "method": _method_for(sel.source_id),
+            })
+
+    df = pd.DataFrame(rows) if rows else pd.DataFrame()
+
+    return {
+        "valid": validation["valid"],
+        "errors": validation["errors"],
+        "warnings": validation["warnings"] + policy_result.warnings,
+        "policy_proceed": policy_result.proceed,
+        "policy_errors": policy_result.errors,
+        "summary": validation["summary"],
+        "plan": plan,
+        "preview_text": preview_text,
+        "dataframe": df,
+    }
+
+
+__all__ = [
+    "build_acquisition_plan", "render_acquisition_plan",
+    "build_enhanced_plan",
+]

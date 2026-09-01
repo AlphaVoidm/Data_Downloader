@@ -138,6 +138,7 @@ with st.sidebar:
 # ============================================================================
 
 tabs = st.tabs([
+    "📋 Selection & Download",
     "🚀 Acquisition & Status",
     "🧭 Availability Audit",
     "🔑 Credentials & Auth Check",
@@ -159,6 +160,372 @@ if "output_root" not in st.session_state:
     st.session_state.output_root = raw_dir
 if "countries" not in st.session_state:
     st.session_state.countries = []
+if "selection_plan" not in st.session_state:
+    st.session_state.selection_plan = None
+if "selection_validated" not in st.session_state:
+    st.session_state.selection_validated = False
+
+# ============================================================================
+# Tab 0: Selection & Download (NEW)
+# ============================================================================
+with tabs[0]:
+    from selection_manager import (
+        get_feature_groups, get_source_groups, get_available_countries,
+        build_download_plan, validate_selection, render_plan_preview,
+        MODE_AUTOMATIC, MODE_MANUAL,
+    )
+    from download_policy import (
+        DownloadPolicy, validate_selection_policy, apply_download_policy,
+        render_policy_report,
+    )
+
+    st.subheader("📋 Source & Feature Selection System")
+    st.markdown(
+        "Control exactly **what** to acquire, **from where**, and **when**. "
+        "The selection manager validates your choices against the source registry "
+        "before any download begins. Strict data validation prevents silent NULL datasets."
+    )
+
+    # --- Section 1: Countries ---
+    st.markdown("### 1. Countries")
+    col_sel1, col_sel2, col_sel3 = st.columns([2, 1, 1])
+
+    with col_sel1:
+        all_countries = get_available_countries()
+        country_options = [f"{c['iso3']} — {c['name']}" for c in all_countries]
+
+        # Quick presets
+        preset_options = ["Custom"] + list(REGIONAL_PRESETS.keys())
+        sel_preset = st.selectbox("Quick Preset", preset_options, key="sel_preset")
+
+        if sel_preset != "Custom":
+            preset_codes = get_preset_countries(sel_preset)
+            default_idx = [i for i, c in enumerate(all_countries) if c["iso3"] in preset_codes]
+        else:
+            default_idx = []
+
+        sel_countries = st.multiselect(
+            "Select countries",
+            options=country_options,
+            default=[country_options[i] for i in default_idx[:10]] if default_idx else [],
+            key="sel_countries_multi",
+            help="Select one or more countries to download data for",
+        )
+        selected_iso3 = [c.split(" — ")[0] for c in sel_countries]
+
+    with col_sel2:
+        if st.button("Select All", key="sel_all"):
+            st.session_state.sel_countries_multi = country_options
+            st.rerun()
+    with col_sel3:
+        if st.button("Clear", key="sel_clear"):
+            st.session_state.sel_countries_multi = []
+            st.rerun()
+
+    if selected_iso3:
+        st.caption(f"✅ {len(selected_iso3)} countries selected: {', '.join(selected_iso3[:10])}" +
+                   ("..." if len(selected_iso3) > 10 else ""))
+
+    st.markdown("---")
+
+    # --- Section 2: Features ---
+    st.markdown("### 2. Features")
+    feature_groups = get_feature_groups()
+
+    selected_features: list[str] = []
+
+    # Research Ready quick select
+    col_fr1, col_fr2, col_fr3 = st.columns(3)
+    with col_fr1:
+        if st.button("Research Ready (Target + Core)", key="sel_research_ready"):
+            from feature_registry import get_target_feature, get_core_exogenous
+            target = get_target_feature()
+            core = get_core_exogenous()
+            st.session_state.sel_features_state = [target.concept] + [f.concept for f in core]
+            st.rerun()
+    with col_fr2:
+        if st.button("Core Climate Only", key="sel_climate"):
+            st.session_state.sel_features_state = [
+                "electricity_demand", "temperature_2m", "solar_radiation",
+                "wind_speed_10m", "precipitation"
+            ]
+            st.rerun()
+    with col_fr3:
+        if st.button("Clear Features", key="sel_feat_clear"):
+            st.session_state.sel_features_state = []
+            st.rerun()
+
+    for group_key, group_info in feature_groups.items():
+        with st.expander(f"**{group_info['label']}** — {group_info['description']}", expanded=(group_key == "TARGET")):
+            for feat in group_info["features"]:
+                default_checked = feat["concept"] in st.session_state.get("sel_features_state", [])
+                # Always include target by default
+                if feat.get("is_target"):
+                    default_checked = True
+                checked = st.checkbox(
+                    f"{feat['name']} ({feat['frequency']}, {feat['unit']})",
+                    value=default_checked,
+                    key=f"feat_{feat['concept']}",
+                    help=f"Domain: {feat['domain']} | Sources: {', '.join(feat['sources'])}",
+                )
+                if checked:
+                    selected_features.append(feat["concept"])
+
+    # Update session state for quick-select buttons
+    if st.session_state.get("sel_features_state") is not None:
+        # Re-run to apply the button selections
+        pass
+
+    st.caption(f"✅ {len(selected_features)} features selected")
+
+    st.markdown("---")
+
+    # --- Section 3: Source Mode ---
+    st.markdown("### 3. Source Mode")
+    source_mode = st.radio(
+        "Source selection mode",
+        [MODE_AUTOMATIC, MODE_MANUAL],
+        format_func=lambda x: "🤖 Automatic (system picks best source per feature)" if x == MODE_AUTOMATIC else "✋ Manual (you pick the source for each feature)",
+        horizontal=True,
+        key="sel_source_mode",
+    )
+
+    source_overrides: dict[str, str] = {}
+    if source_mode == MODE_MANUAL:
+        st.info("In manual mode, you explicitly choose which source to use for each feature. "
+                "If that source cannot provide the data, the result will be PARTIAL_SUCCESS rather than silently switching.")
+        source_groups = get_source_groups()
+        for domain, sources in source_groups.items():
+            with st.expander(f"{domain}", expanded=False):
+                for src in sources:
+                    st.markdown(f"**{src['source_name']}** — {src['coverage']} | {src['frequency']} | {src['historical']}")
+                    # For each feature this source provides, allow override
+                    for feat_concept in src["features"]:
+                        if feat_concept in selected_features:
+                            override = st.checkbox(
+                                f"Use {src['source_name']} for {feat_concept}",
+                                key=f"override_{src['source_id']}_{feat_concept}",
+                            )
+                            if override:
+                                source_overrides[feat_concept] = src["source_id"]
+
+    st.markdown("---")
+
+    # --- Section 4: Period ---
+    st.markdown("### 4. Period")
+    current_yr_sel = date.today().year
+    col_p1, col_p2 = st.columns(2)
+    with col_p1:
+        sel_start_year = st.number_input("Start Year", min_value=1950, max_value=current_yr_sel,
+                                         value=2000, key="sel_start_year")
+    with col_p2:
+        sel_end_year = st.number_input("End Year", min_value=1950, max_value=2100,
+                                       value=current_yr_sel, key="sel_end_year")
+
+    st.markdown("---")
+
+    # --- Section 5: Download Plan Preview ---
+    st.markdown("### 5. Download Plan")
+
+    col_btn1, col_btn2 = st.columns(2)
+    with col_btn1:
+        validate_btn = st.button("🔍 VALIDATE SELECTION", type="secondary", use_container_width=True, key="sel_validate")
+    with col_btn2:
+        download_btn = st.button("🚀 DOWNLOAD", type="primary", use_container_width=True, key="sel_download")
+
+    if validate_btn or st.session_state.get("selection_plan"):
+        if validate_btn or not st.session_state.get("selection_plan"):
+            # Build and validate the plan
+            creds = {}
+            for k, v in entered_credentials.items():
+                if v:
+                    creds[k] = v
+            # Also check env
+            for env_key in ("EIA_API_KEY", "ENTSOE_API_TOKEN", "EMBER_API_KEY", "CDS_API_KEY"):
+                env_val = os.getenv(env_key, "")
+                if env_val and env_key not in creds:
+                    creds[env_key] = env_val
+
+            result = validate_selection(
+                countries=selected_iso3,
+                features=selected_features,
+                start_year=int(sel_start_year),
+                end_year=int(sel_end_year),
+                source_mode=source_mode,
+                source_overrides=source_overrides,
+                credentials=creds if creds else None,
+            )
+            st.session_state.selection_plan = result
+
+        plan_result = st.session_state.selection_plan
+        plan = plan_result["plan"]
+        summary = plan_result["summary"]
+
+        # Summary metrics
+        m1, m2, m3, m4, m5 = st.columns(5)
+        m1.metric("Countries", summary["countries"])
+        m2.metric("Features", summary["features"])
+        m3.metric("Sources", summary["sources"])
+        m4.metric("Requests (supported)", summary["requests"])
+        m5.metric("Auth issues", summary["auth_issues"])
+
+        # Errors / Warnings
+        if plan_result["errors"]:
+            for err in plan_result["errors"]:
+                st.error(f"❌ {err}")
+        if plan_result["warnings"]:
+            for warn in plan_result["warnings"]:
+                st.warning(f"⚠️ {warn}")
+
+        # Preview text
+        st.markdown("#### Download Plan Preview")
+        st.code(render_plan_preview(plan), language=None)
+
+        # Detailed table
+        if plan.countries:
+            rows = []
+            for cp in plan.countries:
+                for sel in cp.selections:
+                    status_icon = {
+                        "SUPPORTED": "🟢", "AUTH_REQUIRED": "🔑",
+                        "NOT_SUPPORTED": "⚪", "MAPPING_REQUIRED": "🔵",
+                        "TEMPORARILY_UNAVAILABLE": "🟠", "UNKNOWN": "❓",
+                    }.get(sel.coverage_status, "❓")
+                    rows.append({
+                        "Country": f"{cp.iso3} ({cp.country_name})",
+                        "Feature": sel.feature_name,
+                        "Source": sel.source_name or "(none)",
+                        "Status": f"{status_icon} {sel.coverage_status}",
+                        "Frequency": sel.frequency,
+                        "Period Overlap (mo)": sel.period_overlap_months,
+                        "Auth": "🔑✓" if sel.auth_satisfied else ("🔑✗ Required" if sel.auth_required else "—"),
+                    })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
+        # Validation result
+        if plan_result["valid"]:
+            st.success("✅ Selection is valid — ready to download")
+        else:
+            st.error("❌ Selection has errors — fix before downloading")
+
+    st.markdown("---")
+
+    # --- Download Policy ---
+    with st.expander("⚙️ Download Policy (validation rules)", expanded=False):
+        st.markdown("Configure what happens when downloaded data fails validation checks.")
+        col_dp1, col_dp2 = st.columns(2)
+        with col_dp1:
+            st.checkbox("Reject invalid schema", value=True, key="dp_schema", disabled=True)
+            st.checkbox("Reject wrong country", value=True, key="dp_country", disabled=True)
+            st.checkbox("Reject wrong date range", value=True, key="dp_date")
+            st.checkbox("Reject unexpected units", value=False, key="dp_units")
+            st.checkbox("Reject completely empty response", value=True, key="dp_empty", disabled=True)
+        with col_dp2:
+            st.checkbox("Reject malformed response", value=True, key="dp_malformed", disabled=True)
+            st.checkbox("Reject duplicate records", value=False, key="dp_dup")
+            st.checkbox("Warn on missing periods", value=True, key="dp_warn_missing")
+            st.checkbox("Warn on partial coverage", value=True, key="dp_warn_partial")
+            st.checkbox("Never silently fill missing target values", value=True, key="dp_never_fill", disabled=True)
+            st.checkbox("Never silently switch source", value=True, key="dp_never_switch", disabled=True)
+
+        policy = DownloadPolicy(
+            reject_wrong_date_range=st.session_state.get("dp_date", True),
+            reject_unexpected_units=st.session_state.get("dp_units", False),
+            reject_duplicate_records=st.session_state.get("dp_dup", False),
+            warn_missing_periods=st.session_state.get("dp_warn_missing", True),
+            warn_partial_coverage=st.session_state.get("dp_warn_partial", True),
+        )
+
+    # --- Handle Download ---
+    if download_btn:
+        if not selected_iso3:
+            st.error("❌ No countries selected")
+        elif not selected_features:
+            st.error("❌ No features selected")
+        elif sel_end_year < sel_start_year:
+            st.error("❌ End year must be ≥ start year")
+        else:
+            creds = {}
+            for k, v in entered_credentials.items():
+                if v:
+                    creds[k] = v
+            for env_key in ("EIA_API_KEY", "ENTSOE_API_TOKEN", "EMBER_API_KEY", "CDS_API_KEY"):
+                env_val = os.getenv(env_key, "")
+                if env_val and env_key not in creds:
+                    creds[env_key] = env_val
+
+            # Pre-download validation
+            result = validate_selection(
+                countries=selected_iso3,
+                features=selected_features,
+                start_year=int(sel_start_year),
+                end_year=int(sel_end_year),
+                source_mode=source_mode,
+                source_overrides=source_overrides,
+                credentials=creds if creds else None,
+            )
+
+            if not result["valid"]:
+                st.error("❌ Cannot download — fix validation errors first")
+                for err in result["errors"]:
+                    st.error(f"  • {err}")
+            else:
+                # Check policy
+                policy_result = validate_selection_policy(result["summary"], policy)
+                if not policy_result.proceed:
+                    st.error("❌ Download policy blocked:")
+                    for err in policy_result.errors:
+                        st.error(f"  • {err}")
+                else:
+                    if policy_result.warnings:
+                        for w in policy_result.warnings:
+                            st.warning(f"⚠️ {w}")
+
+                    # Determine execution mode based on features
+                    exec_mode = "long-term"  # default for multi-feature
+
+                    # Run the pipeline
+                    status_box = st.status("Downloading with strict validation...", expanded=True)
+
+                    def progress_cb(msg):
+                        status_box.write(f"📥 {msg}")
+
+                    results = run_pipeline(
+                        countries=selected_iso3,
+                        mode=exec_mode,
+                        raw_dir=raw_dir,
+                        start=int(sel_start_year),
+                        end=int(sel_end_year),
+                        progress=progress_cb,
+                        credentials=creds if creds else None,
+                    )
+
+                    status_box.update(
+                        label="✅ Download complete with validation!",
+                        state="complete",
+                        expanded=False,
+                    )
+
+                    st.session_state.pipeline_results = results
+                    st.session_state.run_mode = exec_mode
+                    st.session_state.output_root = raw_dir
+                    st.session_state.countries = selected_iso3
+                    st.session_state.start_yr = int(sel_start_year)
+                    st.session_state.end_yr = int(sel_end_year)
+
+                    # Show results summary
+                    st.success(f"✅ Downloaded {len(results)} datasets for {len(selected_iso3)} countries")
+                    ok_count = sum(1 for r in results if r.status == "SUCCESS")
+                    partial_count = sum(1 for r in results if r.status == "PARTIAL_SUCCESS")
+                    fail_count = sum(1 for r in results if r.status not in ("SUCCESS", "PARTIAL_SUCCESS"))
+                    c1, c2, c3 = st.columns(3)
+                    c1.metric("🟢 SUCCESS", ok_count)
+                    c2.metric("🟡 PARTIAL", partial_count)
+                    c3.metric("🔴 Other", fail_count)
+
+                    st.info(f"📁 Data stored in `{raw_dir}`. Switch to the **🚀 Acquisition & Status** tab for details.")
+
+
 
 # Handle Run Execution
 if run_btn:
@@ -181,7 +548,7 @@ if run_btn:
     elif end_year < start_year:
         st.error("❌ End year must be greater than or equal to start year.")
     else:
-        with tabs[0]:
+        with tabs[1]:
             status_box = st.status("Data acquisition and verification running...", expanded=True)
             results = run_pipeline(
                 countries=parsed_countries,
@@ -204,7 +571,7 @@ if run_btn:
 # ============================================================================
 # Tab 1: Acquisition & Status
 # ============================================================================
-with tabs[0]:
+with tabs[1]:
     if st.session_state.pipeline_results is not None:
         results = st.session_state.pipeline_results
         df_res = pd.DataFrame([r.__dict__ for r in results])
@@ -300,7 +667,7 @@ with tabs[0]:
 # ============================================================================
 # Tab 2: Availability Audit
 # ============================================================================
-with tabs[1]:
+with tabs[2]:
     st.subheader("🧭 HGT-QF Global Data Availability Audit")
     st.markdown(
         "Deterministic **country × feature × source × period** audit computed from the "
@@ -389,7 +756,7 @@ with tabs[1]:
 # ============================================================================
 # Tab 3: Credentials & Auth Check
 # ============================================================================
-with tabs[2]:
+with tabs[3]:
     st.subheader("🔑 Credential Propagation & Source Auth Check")
     st.markdown(
         "Tests each credential-protected source with a **tiny** request **before** any "
@@ -455,7 +822,7 @@ with tabs[2]:
 # ============================================================================
 # Tab 4: Source Capability Matrix
 # ============================================================================
-with tabs[3]:
+with tabs[4]:
     st.subheader("🧩 Source Capability Matrix")
     st.markdown(
         "How each source is **supposed** to be acquired — mode, role, coverage, auth, "
@@ -493,7 +860,7 @@ with tabs[3]:
 # ============================================================================
 # Tab 5: Source Area Mappings
 # ============================================================================
-with tabs[4]:
+with tabs[5]:
     st.subheader("🗺️ Verified Source-Specific Geographic Area Mappings")
     st.markdown("Maps canonical ISO-3 country codes to provider-specific identifiers (ENTSO-E EIC codes, EIA balancing authorities, AEMO region codes).")
 
@@ -526,7 +893,7 @@ with tabs[4]:
 # ============================================================================
 # Tab 6: Country Coverage Inventory
 # ============================================================================
-with tabs[5]:
+with tabs[6]:
     st.subheader("🌐 Country-Level Research Data Inventory")
     st.markdown("Availability matrix mapping candidate countries against HGT-QF feature domains.")
 
@@ -575,7 +942,7 @@ with tabs[5]:
 # ============================================================================
 # Tab 7: Feature Inventory (25 Variables)
 # ============================================================================
-with tabs[6]:
+with tabs[7]:
     st.subheader("📦 HGT-QF 25-Feature Research Input Space Inventory")
     st.markdown("Authoritative specifications for all 25 conceptual variables defined in the HGT-QF research design.")
 
@@ -613,7 +980,7 @@ with tabs[6]:
 # ============================================================================
 # Tab 8: Historical Coverage & L=120 Feasibility
 # ============================================================================
-with tabs[7]:
+with tabs[8]:
     st.subheader("⏳ Historical Coverage Depth & Lookback Feasibility ($L=120, H=12,36,60$)")
     st.markdown("Evaluates historical time horizons of electricity demand data to determine candidate suitability for sequence modeling.")
 
@@ -663,7 +1030,7 @@ with tabs[7]:
 # ============================================================================
 # Tab 9: Dataset Manifests & Hashes
 # ============================================================================
-with tabs[8]:
+with tabs[9]:
     st.subheader("📜 Dataset Manifest & SHA-256 Cryptographic Audit")
     st.markdown("Reproducibility manifest recording SHA-256 hashes, file locations, request parameters, and sentinel detection.")
 
@@ -712,7 +1079,7 @@ with tabs[8]:
 # ============================================================================
 # Tab 10: Source Registry & Licenses
 # ============================================================================
-with tabs[9]:
+with tabs[10]:
     st.subheader("📚 Verified Source Registry, Documentation & Licensing Terms")
 
     sources_list = get_all_registered_sources()

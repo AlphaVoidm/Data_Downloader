@@ -49,17 +49,28 @@ def now_utc() -> str:
 
 def _validate_download(outcome: AcquisitionOutcome, country: str, feature: str,
                        start: int, end: int) -> tuple[bool, list[str]]:
-    """Lightweight post-acquisition validation (never ML preprocessing).
+    """Post-acquisition data quality validation.
 
-    Checks the saved artifact exists, is readable, non-empty, and that any
-    date column falls within the requested period.
+    Uses the comprehensive data_validator module to check:
+        1. Schema validation (required columns exist)
+        2. Country validation (returned data matches requested country)
+        3. Date validation (period overlap with request)
+        4. Null validation (not all-NaN data)
+        5. Coverage calculation (observed vs expected periods)
+        6. Unit validation (reported units match expectations)
+        7. Duplicate detection
+
+    Never silently accepts NULL data as SUCCESS.
     """
     notes: list[str] = []
+
     if not outcome.path:
         return True, ["metadata-only outcome (no file artifact)"]
+
     p = Path(outcome.path)
     if not p.exists():
         return False, [f"output file missing: {p}"]
+
     try:
         import pandas as pd
         if p.suffix == ".csv":
@@ -70,16 +81,70 @@ def _validate_download(outcome: AcquisitionOutcome, country: str, feature: str,
             return False, [f"unrecognized output format: {p.suffix}"]
     except Exception as exc:  # noqa: BLE001
         return False, [f"output unreadable: {exc}"]
+
     if df.empty:
         return False, ["output file has zero rows"]
-    notes.append(f"validated {len(df)} rows")
-    date_col = next((c for c in df.columns if str(c).lower() in ("date", "month", "period", "year")), None)
-    if date_col is not None:
-        try:
-            d = pd.to_datetime(df[date_col], errors="coerce")
-            notes.append(f"date range {d.min()} .. {d.max()}")
-        except Exception:  # noqa: BLE001
-            pass
+
+    # Run the comprehensive data validator
+    try:
+        from data_validator import validate_downloaded_data, VALID, PARTIAL_VALID
+
+        country_name = getattr(outcome, "country_name", country)
+        source_name = getattr(outcome, "source_name", outcome.source_id if hasattr(outcome, "source_id") else "")
+        frequency = outcome.frequency if hasattr(outcome, "frequency") and outcome.frequency else "monthly"
+        reported_unit = outcome.unit if hasattr(outcome, "unit") and outcome.unit else ""
+
+        report = validate_downloaded_data(
+            df=df,
+            country_name=country_name,
+            iso3=country,
+            concept=feature,
+            source=source_name,
+            start_year=start,
+            end_year=end,
+            frequency=frequency,
+            reported_unit=reported_unit,
+        )
+
+        if report.status == VALID:
+            notes.append(
+                f"✓ VALID: {report.records_valid:,} records, "
+                f"{report.coverage_pct:.1f}% coverage, "
+                f"{report.null_percentage:.1f}% null"
+            )
+        elif report.status == PARTIAL_VALID:
+            warn_msgs = [f.message for f in report.findings if f.severity == "WARN"]
+            notes.append(
+                f"⚠ PARTIAL: {report.records_valid:,} records, "
+                f"{report.coverage_pct:.1f}% coverage, "
+                f"{'|'.join(warn_msgs[:2])}"
+            )
+        else:
+            reject_msgs = [f.message for f in report.findings if f.severity == "REJECT"]
+            notes.append(
+                f"✗ {report.status}: {report.records_received:,} received, "
+                f"{'|'.join(reject_msgs[:2])}"
+            )
+            return False, notes
+
+        # Always append date info
+        if report.date_first and report.date_last:
+            notes.append(f"date range {report.date_first} .. {report.date_last}")
+        notes.append(f"null: {report.null_count} ({report.null_percentage:.1f}%), "
+                     f"duplicates: {report.duplicate_count}")
+
+    except ImportError:
+        # Fallback to lightweight validation if data_validator not available
+        notes.append(f"validated {len(df)} rows")
+        date_col = next((c for c in df.columns if str(c).lower() in ("date", "month", "period", "year")), None)
+        if date_col is not None:
+            try:
+                import pandas as pd
+                d = pd.to_datetime(df[date_col], errors="coerce")
+                notes.append(f"date range {d.min()} .. {d.max()}")
+            except Exception:  # noqa: BLE001
+                pass
+
     return True, notes
 
 
